@@ -1,10 +1,10 @@
 import torch
 
-from src_core import installer
-from src_core.classes import paths
-from src_core.classes.Plugin import Plugin
-from src_core.classes.prompt_job import prompt_job
-from src_core.plugins import plugjob
+from src import installer
+from src.classes import paths
+from src.classes.Plugin import Plugin
+from src.classes.prompt_job import prompt_job
+from src.plugins import plugjob
 from src_plugins.paella import colab
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

@@ -4,10 +4,12 @@ import facexlib
 import gfpgan
 
 import src_plugins.sd1111_plugin.options
-from src_core import devicelib
-from src_core.lib import modellib
-from src_core.classes.paths import modeldir, root
-from src_core.installer import *
+from skimage._shared.version_requirements import is_installed
+
+from src import devicelib
+from src.lib import modellib
+from src.classes.paths import modeldir, root
+from src.installer import *
 from shared import cmd_opts
 
 model_dir = "GFPGAN"

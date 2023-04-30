@@ -8,7 +8,7 @@ import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 from torchvision import transforms
 
-from src_core.lib import devices
+from src.lib import devices
 from .infer import InferenceHelper
 from .adabins import UnetAdaptiveBins
 

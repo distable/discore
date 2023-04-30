@@ -2,17 +2,18 @@ import argparse
 import os
 import pathlib
 import sys
+from fileinput import filename
 
 import PIL
 import scipy
 from tqdm import tqdm
 
-from src_core.classes.JobArgs import JobArgs
-from src_core.classes.convert import load_pil, load_pilarr, save_jpg, save_npy, save_png
-from src_core.classes.Plugin import Plugin
-from src_core.installer import gitclone
-from src_core.plugins import plugjob
-from src_core.party.maths import clamp01
+from src.classes.JobArgs import JobArgs
+from src.classes.convert import load_pil, load_pilarr, save_jpg, save_npy, save_png
+from src.classes.Plugin import Plugin
+from src.installer import gitclone
+from src.plugins import plugjob
+from src.party.maths import clamp01
 from python_color_transfer.color_transfer import ColorTransfer, Regrain
 from pathlib import Path
 

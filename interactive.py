@@ -19,11 +19,12 @@
 
 import socket
 import sys
+import termios
+
 from paramiko.py3compat import u
 #
 # windows does not have termios...
 try:
-    import termios
     import tty
 
     has_termios = True

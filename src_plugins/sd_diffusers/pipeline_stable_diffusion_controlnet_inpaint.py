@@ -15,6 +15,8 @@
 import torch
 import PIL.Image
 import numpy as np
+from cleanfid.features import feature_extractor
+from diffusers.models import controlnet
 
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_controlnet import *
 

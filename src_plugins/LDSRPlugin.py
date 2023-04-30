@@ -5,10 +5,10 @@ import traceback
 from basicsr.utils.download_util import load_file_from_url
 
 import src_plugins.sd1111_plugin.options
-from src_core.installer import mvfiles
+from src.installer import mvfiles
 from old.upscaler import Upscaler, UpscalerData
-from src_core.plugins import LDSR
-from src_core.classes.paths import root, modeldir
+from src.plugins import LDSR
+from src.classes.paths import root, modeldir
 
 
 class LDSRPlugin(Upscaler):

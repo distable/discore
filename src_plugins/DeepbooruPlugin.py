@@ -2,9 +2,9 @@ import os.path
 import multiprocessing
 import time
 
-from src_core.installer import pipargs
+from src.installer import pipargs
 from run import is_installed
-from src_core.classes.Plugin import Plugin
+from src.classes.Plugin import Plugin
 
 
 class DeepDanbooruPlugin(Plugin):

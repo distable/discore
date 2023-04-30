@@ -74,7 +74,7 @@ is_vastai_continue = args.vastai_continue or args.vastai_continue_quick
 
 
 def get_discore_session(load=True, *, nosubdir=False):
-    from src_core.classes.Session import Session
+    from src.classes.Session import Session
     s = Session(args.session or args.action or args.script, load=load)
     if not nosubdir:
         s = s.subsession(args.subdir)

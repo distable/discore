@@ -1,4 +1,3 @@
-import logging
 import os
 import subprocess
 import sys
@@ -9,10 +8,10 @@ from paramiko.ssh_exception import NoValidConnectionsError, SSHException
 from yachalk import chalk
 
 import jargs
-from classes.printlib import print_cmd
+from src.lib.printlib import print_cmd
 from jargs import args, argv
-from src_core.classes import paths
-import renderer
+from src.classes import paths
+from src import renderer
 import paramiko
 import userconf
 import json
@@ -30,7 +29,7 @@ deploy_rsync = [('requirements-vastai.txt', 'requirements.txt'),
                 'jargs.py',
                 paths.userconf_name,
                 paths.scripts_name,
-                paths.src_core_name,
+                paths.src_name,
                 paths.src_plugins_name,
                 # paths.plug_repos_name
                 ]
@@ -60,7 +59,7 @@ vastai_python_bin = '/opt/conda/bin/python3'
 # Commands to run in order to setup a deployment
 def get_deploy_commands(clonepath):
     return [
-        ['git', 'clone', '--recursive', 'https://github.com/distable/core', clonepath],
+        ['git', 'clone', '--recursive', 'https://github.com/distable/obo', clonepath],
         ['git', '-C', clonepath, 'submodule', 'update', '--init', '--recursive'],
     ]
 
@@ -314,7 +313,7 @@ def deploy_vastai():
         except SSHException as e:
             os.system(kitty_cmd)
 
-    from src_core.deploy.sftpclient import SFTPClient
+    from src.deploy.sftpclient import SFTPClient
     sftp = SFTPClient.from_transport(ssh.get_transport())
     sftp.max_size = 10 * 1024 * 1024
     sftp.urls = []
@@ -481,7 +480,7 @@ def deploy_vastai():
         """
         Detect changes to the code (in src/scripts) and copy them up to the server (to dst/scripts)
         """
-        from src_core.deploy.watch import Watcher
+        from src.deploy.watch import Watcher
 
         changed_files = []
 

@@ -1,7 +1,7 @@
 import userconf
 
-from src_core import core
-from src_core.classes.Session import Session
+from src import core
+from src.classes.Session import Session
 
 if __name__ == "__main__":
     assert userconf.hasplug('sd1111'), "This test requires sd1111"

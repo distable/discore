@@ -8,9 +8,9 @@ import torch
 from basicsr.utils.download_util import load_file_from_url
 
 import old.upscaler
-from src_core import devicelib
-from src_core.lib import modellib
-from src_core.plugins import SCUNet as net
+from src import devicelib
+from src.lib import modellib
+from src.plugins import SCUNet as net
 
 
 class UpscalerScuNET(old.upscaler.Upscaler):

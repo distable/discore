@@ -16,4 +16,6 @@ append_list = [
 sys.argv.extend(append_list)
 
 print(' '.join(sys.argv[1:]))
+
+# noinspection PyUnresolvedReferences
 import discore

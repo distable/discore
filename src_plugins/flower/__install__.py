@@ -2,9 +2,9 @@
 # ----------------------------------------
 import sys
 
-import installer
-from src_core.classes import paths
-from src_core.installer import gitclone
+import src.installer
+from src.classes import paths
+from src.installer import gitclone
 
 repo_dir = paths.plug_repos / "flower" / "SD_CN_Animation"
 

@@ -6,8 +6,8 @@ import installer
 from classes.convert import load_cv2
 from lib.devices import device
 from plug_repos.flower.SD_CN_Animation.FloweR.model import FloweR
-from src_core.rendering.hud import hud, snap
-from src_core.classes.Plugin import Plugin
+from src.rendering.hud import hud, snap
+from src.classes.Plugin import Plugin
 from src_plugins.flower import flow_viz
 from src_plugins.flower.flow_utils import flow_renorm, frames_norm, occl_renorm
 

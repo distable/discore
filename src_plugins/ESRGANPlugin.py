@@ -5,12 +5,12 @@ import torch
 from PIL import Image
 from basicsr.utils.download_util import load_file_from_url
 
-from src_core.installer import mvfiles
-from src_core import plugins as arch, devicelib
-from src_core.lib import modellib
+from src.installer import mvfiles
+from src import plugins as arch, devicelib
+from src.lib import modellib
 from old.upscaler import Upscaler, UpscalerData
 from shared import opts
-from src_core.classes.paths import root, modeldir
+from src.classes.paths import root, modeldir
 
 
 def fix_model_layers(crt_model, pretrained_net):

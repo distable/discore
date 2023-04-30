@@ -1,6 +1,5 @@
 
 import jargs
-from src_core.conf import *
 
 share = False
 
@@ -15,6 +14,12 @@ share = False
 #     'sd1111',
 #     'glsl'
 # ]
+
+default_width = 640
+default_height = 448
+if jargs.args.remote:
+    default_width = 768
+    default_height = 512
 
 # Core
 # ----------------------------------------
@@ -61,19 +66,6 @@ vastai_sshfs_path = "~/discore/mount/"
 #     'sd-v1-5.ckpt': 'https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.ckpt',
 #     'vae.vae.pt'  : 'https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.ckpt',
 # }
-
-if jargs.args.remote:
-    print("----------------------------------------")
-    print("Activating remote arguments")
-    print("----------------------------------------")
-    sd.load = True
-    # sd1111.medvram = False
-    # sd1111.lowvram = False
-    # sd1111.precision = 'half'
-    # sd1111.no_half = False
-    # sd1111.no_half_vae = False
-    # sd1111.batch_cond_uncond = True
-    # jargs.args.zip_every = 120
 
 # GUI config
 # ----------------------------------------

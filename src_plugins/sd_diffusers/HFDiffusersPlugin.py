@@ -1,13 +1,12 @@
 import numpy as np
 import tomesd
-import torch
 from compel import Compel
 
-from classes.convert import load_cv2, load_pil
-from lib.devices import device
-from plugins import plugfun, plugfun_img
-from src_core.rendering.hud import hud
-from src_core.classes.Plugin import Plugin
+from src.classes.convert import load_cv2, load_pil
+from src.lib.devices import device
+from src.plugins import plugfun, plugfun_img, plugfun_self
+from src.rendering.hud import hud
+from src.classes.Plugin import Plugin
 
 from diffusers import AutoencoderKL, ControlNetModel, EulerAncestralDiscreteScheduler, StableDiffusionControlNetPipeline, StableDiffusionImg2ImgPipeline, StableDiffusionPipeline, UniPCMultistepScheduler
 
@@ -37,6 +36,7 @@ def slerp(v0, v1, t, DOT_THRESHOLD=0.9995):
         v2 = s0 * v0 + s1 * v1
 
     if inputs_are_torch:
+        import torch
         v2 = torch.from_numpy(v2).to(input_device)
 
     return v2
@@ -69,34 +69,36 @@ class HFDiffusersPlugin(Plugin):
         # self.pvar.enable_model_cpu_offload()
         # self.pvar.enable_attention_slicing()
 
-        def init_versatile(self):
-            if self.pvd is not None: return
-            print("Diffusers: Loading Versatile Diffusion...")
-            from diffusers import VersatileDiffusionPipeline
-            self.pvd = VersatileDiffusionPipeline.from_pretrained("shi-labs/versatile-diffusion",
-                                                                  safety_checker=None,
-                                                                  requires_safety_checker=False)
-            self.pvd.scheduler = UniPCMultistepScheduler.from_config(self.pvd.scheduler.config)
-            self.pvd.scheduler = EulerAncestralDiscreteScheduler(beta_start=0.0001, beta_end=0.02, beta_schedule="linear", num_train_timesteps=1000)
-            self.pvd.enable_model_cpu_offload()
-            self.pvd.enable_attention_slicing(1)
+    def init_versatile(self):
+        if self.pvd is not None: return
+        print("Diffusers: Loading Versatile Diffusion...")
+        from diffusers import VersatileDiffusionPipeline
+        self.pvd = VersatileDiffusionPipeline.from_pretrained("shi-labs/versatile-diffusion",
+                                                              safety_checker=None,
+                                                              requires_safety_checker=False)
+        self.pvd.scheduler = UniPCMultistepScheduler.from_config(self.pvd.scheduler.config)
+        self.pvd.scheduler = EulerAncestralDiscreteScheduler(beta_start=0.0001, beta_end=0.02, beta_schedule="linear", num_train_timesteps=1000)
+        self.pvd.enable_model_cpu_offload()
+        self.pvd.enable_attention_slicing(1)
 
+    @plugfun(plugfun_self('sd_diffusers'))
     def sd(self):
         self.init_sd()
         return self
 
+    @plugfun(plugfun_self('sd_diffusers'))
     def cn(self, *models):
         self.init_controlnet(models)
         return self
 
     @plugfun()
     def init_controlnet(self, models):
+        import torch
         def load_model(name):
             if name == "canny": return ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-canny", file='', torch_dtype=torch.float16)
             elif name == "hed":  return ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-hed", file='', torch_dtype=torch.float16)
             elif name == "depth":  return ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-depth", file='', torch_dtype=torch.float16)
             elif name == "temporal":  return ControlNetModel.from_pretrained("CiaraRowles/TemporalNet", file='', torch_dtype=torch.float16)
-
 
         print("Diffusers: Loading ControlNet...")
         model_list = []
@@ -119,23 +121,9 @@ class HFDiffusersPlugin(Plugin):
 
         tomesd.apply_patch(self.pcontrolnet.unet, ratio=TOMESD_RATIO, sx=2, sy=2, max_downsample=1)
 
-        # if self.pcontrolnet is None:
-        # else:
-        #     print("Swapping controlnets...")
-        #     self.pcontrolnet.controlnet = StableDiffusionControlNetPipeline.from_pretrained(
-        #             "runwayml/stable-diffusion-v1-5",
-        #             safety_checker=None,
-        #             requires_safety_checker=False,
-        #             controlnet=model_list,
-        #             unet = self.pcontrolnet.unet,
-        #             text_encoder = self.pcontrolnet.text_encoder,
-        #             vae = self.pcontrolnet.vae,
-        #             tokenizer = self.pcontrolnet.tokenizer,
-        #             scheduler = self.pcontrolnet.scheduler,
-        #             torch_dtype=torch.float16).to("cuda")
-
     @plugfun()
     def init_sd(self):
+        import torch
         if self.ptxt is not None: return
         print("Diffusers: Loading SD...")
 
@@ -170,7 +158,7 @@ class HFDiffusersPlugin(Plugin):
     @plugfun(plugfun_img)
     def txt2img_cn(self,
                    prompt: str = None,
-                   negprompt: str = None,
+                   promptneg: str = None,
                    cfg: float = 7.0,
                    image: str = None,
                    ccg: float = 1.0,
@@ -181,8 +169,9 @@ class HFDiffusersPlugin(Plugin):
                    h: int = 512,
                    seed_grain: float = 0,
                    **kwargs):
-        from src_core.party import tricks
-        import renderer
+        from src.party import tricks
+        import torch
+        from src import renderer
         session = renderer.session
 
         hud(seed=seed, chg=chg, cfg=cfg, ccg=ccg)
@@ -215,13 +204,13 @@ class HFDiffusersPlugin(Plugin):
 
 
         # text_embed = self.compel.build_conditioning_tensor(prompt)
-        # text_embed_neg = self.compel.build_conditioning_tensor(negprompt or '')
+        # text_embed_neg = self.compel.build_conditioning_tensor(promptneg or '')
 
         images = self.pcontrolnet(
                 # prompt_embeds=text_embed,
                 # negative_prompt_embeds=text_embed_neg,
                 prompt=prompt,
-                negative_prompt=negprompt or '',
+                negative_prompt=promptneg or '',
                 image=image or session.img,
                 # rv.img = im.astype(np.uint8)
                 width=w,
@@ -239,7 +228,7 @@ class HFDiffusersPlugin(Plugin):
     @plugfun(plugfun_img)
     def txt2img(self,
                 prompt: str = None,
-                negprompt: str = None,
+                promptneg: str = None,
                 cfg: float = 7.0,
                 image: str = None,
                 ccg: float = 1.0,
@@ -248,13 +237,14 @@ class HFDiffusersPlugin(Plugin):
                 seed: int = 0,
                 **kwargs):
         self.init_sd()
-        import renderer
+        import torch
+        from src import renderer
         session = renderer.session
 
         hud(seed=seed, chg=chg, cfg=cfg, ccg=ccg)
         hud(prompt=prompt)
         # text_embed = self.compel.build_conditioning_tensor(prompt)
-        # text_embed_neg = self.compel.build_conditioning_tensor(negprompt or '')
+        # text_embed_neg = self.compel.build_conditioning_tensor(promptneg or '')
 
         generator = torch.Generator(device="cpu").manual_seed(int(seed))
 
@@ -262,7 +252,7 @@ class HFDiffusersPlugin(Plugin):
                 # prompt_embeds=text_embed,
                 # negative_prompt_embeds=text_embed_neg,
                 prompt=prompt,
-                negative_prompt=negprompt or '',
+                negative_prompt=promptneg or '',
                 image=image or session.img,
                 guidance_scale=cfg,
                 output_type='np',
@@ -270,7 +260,7 @@ class HFDiffusersPlugin(Plugin):
                 generator=generator).images
 
         if images is None or len(images) == 0:
-            from renderer import rv
+            from src.renderer import rv
             return rv.img
 
         image = images[0]
@@ -280,7 +270,7 @@ class HFDiffusersPlugin(Plugin):
     @plugfun(plugfun_img)
     def img2img(self,
                 prompt: str = None,
-                negprompt: str = None,
+                promptneg: str = None,
                 cfg: float = 7.0,
                 image: str = None,
                 ccg: float = 1.0,
@@ -292,7 +282,9 @@ class HFDiffusersPlugin(Plugin):
                 **kwargs):
         self.init_sd()
         # return self.txt2img(self, job)
-        import renderer
+        import torch
+        from src import renderer
+
         session = renderer.session
 
         if not w: w = session.w
@@ -309,13 +301,13 @@ class HFDiffusersPlugin(Plugin):
         hud(prompt=prompt)
 
         # text_embed = self.compel.build_conditioning_tensor(prompt)
-        # text_embed_neg = self.compel.build_conditioning_tensor(negprompt or '')
+        # text_embed_neg = self.compel.build_conditioning_tensor(promptneg or '')
         generator = torch.Generator(device="cpu").manual_seed(int(seed))
         images = self.pimg(
                 # prompt_embeds=text_embed,
                 # negative_prompt_embeds=text_embed_neg,
                 prompt=prompt,
-                negative_prompt=negprompt or '',
+                negative_prompt=promptneg or '',
                 image=image,
                 strength=chg,
                 guidance_scale=cfg,
@@ -324,7 +316,7 @@ class HFDiffusersPlugin(Plugin):
                 generator=generator).images
 
         if images is None or len(images) == 0:
-            from renderer import rv
+            from src.renderer import rv
             return rv.img
 
         image = images[0]
@@ -341,6 +333,7 @@ class HFDiffusersPlugin(Plugin):
                steps: int = 30,
                seed: int = 0,
                **kwargs):
+        import torch
         self.init_versatile()
         if image is not None:
             image = load_pil(image)

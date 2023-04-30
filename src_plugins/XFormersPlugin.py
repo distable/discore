@@ -1,7 +1,7 @@
 import platform
 
-from src_core.installer import pipargs
-from src_core.classes.Plugin import Plugin
+from src.installer import pipargs
+from src.classes.Plugin import Plugin
 
 
 class XFormersPlugin(Plugin):

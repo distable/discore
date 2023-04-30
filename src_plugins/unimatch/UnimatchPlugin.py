@@ -5,8 +5,8 @@ import numpy as np
 import torch
 from PIL import Image
 
-from src_core.classes import JobArgs
-from src_core.classes.Plugin import Plugin
+from src.classes import JobArgs
+from src.classes.Plugin import Plugin
 from conf import plugdef
 from lib import devices
 from lib.devices import device

@@ -1,53 +1,17 @@
 import math
 
 import numpy as np
-import torch
 from einops import rearrange
 from PIL import ImageOps
 
-from classes.convert import load_cv2, pil2cv
-from src_core.party import tricks
-from . import py3d_tools as p3d
-from .depth import DepthModel
+from src.classes.convert import load_cv2, pil2cv
+from src.party import tricks
 
-from src_core.classes.JobArgs import JobArgs
-from src_core.classes.Plugin import Plugin
-from src_core.lib import devices
-from src_core.plugins import plugfun, plugfun_img
+from src.classes.Plugin import Plugin
+from src.lib import devices
+from src.plugins import plugfun, plugfun_img
 
 TRANSLATION_SCALE = 1.0 / 200.0
-
-
-class transform3d_job(JobArgs):
-    def __init__(self, x: float = 0,
-                 y: float = 0,
-                 z: float = 0,
-                 rx: float = 0,
-                 ry: float = 0,
-                 rz: float = 0,
-                 fov: float = 90,
-                 near: float = 200,
-                 far: float = 10000,
-                 w_midas: float = 0.3,
-                 padding_mode: str = 'border',
-                 sampling_mode: str = 'bicubic',
-                 flat: bool = False,
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.x = x
-        self.y = y
-        self.z = z
-        self.rx = rx
-        self.ry = ry
-        self.rz = rz
-        self.fov = fov
-        self.near = near
-        self.far = far
-        self.w_midas = w_midas
-        self.padding_mode = padding_mode
-        self.sampling_mode = sampling_mode
-        self.flat = flat
-        self.dev = False
 
 
 class Midas3DPlugin(Plugin):
@@ -61,6 +25,7 @@ class Midas3DPlugin(Plugin):
         self.loaded = True
 
         print("Loading midas ...")
+        from .depth import DepthModel
         self.model = DepthModel(devices.device)
         self.model.download_midas(self.res())
         self.model.download_adabins(self.res())
@@ -71,6 +36,9 @@ class Midas3DPlugin(Plugin):
     def transform_image_3d(self, prev_img_cv2, depth_tensor, rot_mat, translate, near, far, fov, padding_mode, sampling_mode):
         if not self.loaded:
             self.load()
+
+        import torch
+        from . import py3d_tools as p3d
 
         # device = devices.device
         device = devices.cpu
@@ -119,6 +87,7 @@ class Midas3DPlugin(Plugin):
                      padding_mode, sampling_mode,
                      w_midas,
                      depth=None):
+        import torch
         imcv = load_cv2(imcv)
 
         x = x
@@ -147,7 +116,7 @@ class Midas3DPlugin(Plugin):
 
     def mat3d_dev(self, *kargs, **kwargs):
         if 'z' in kwargs:
-            kwargs['z'] /= 100
+            kwargs['z'] *= TRANSLATION_SCALE
         return tricks.mat2d(*kargs, **kwargs)
 
     @plugfun(mat3d_dev)
@@ -167,7 +136,8 @@ class Midas3DPlugin(Plugin):
               depth=None,
               flat: bool = False,
               **kwargs):
-        import renderer
+        from src import renderer
+        import torch
         rv = renderer.rv
 
         if rv.img is None:
@@ -193,7 +163,7 @@ class Midas3DPlugin(Plugin):
         if not self.loaded:
             self.load()
 
-        import renderer
+        from src import renderer
         session = renderer.session
 
         if img is None:

@@ -1,10 +1,5 @@
-import math
-import os
-import time
-from src_core.lib.corelib import to_dict
-from src_core.classes.JobArgs import JobArgs
-from src_core.classes.Plugin import Plugin
-from src_core.plugins import plugjob
+from src.classes.Plugin import Plugin
+
 #
 # os.environ.setdefault("DEMOSYS_SETTINGS_MODULE", "src_plugins.glsl_plugin.demosys_settings")
 # from demosys.conf import default, settings
@@ -162,13 +157,6 @@ from src_core.plugins import plugjob
 #
 #
 
-class glsl_job(JobArgs):
-    def __init__(self, name, props, img2, **kwargs):
-        JobArgs.__init__(self, **kwargs)
-        self.name = name
-        self.props = props
-        self.img2 = img2
-
 
 class GLSLPlugin(Plugin):
     def title(self):
@@ -182,6 +170,6 @@ class GLSLPlugin(Plugin):
         pass
 
     # def render_glsl(self, name, props, image, image2=None):
-    @plugjob
-    def glsl(self, j: glsl_job):
-        pass
+    # @plugjob
+    # def glsl(self, j: glsl_job):
+    #     pass

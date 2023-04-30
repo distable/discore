@@ -1,6 +1,6 @@
 [submodule "src_plugins/sd1111_plugin"]
 	path = src_plugins/sd1111_plugin
 	url = ../sd1111_plugin.git
-[submodule "src_core/classes"]
-	path = src_core/classes
+[submodule "src/classes"]
+	path = src/classes
 	url = ../core-lib.git

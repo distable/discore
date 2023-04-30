@@ -6,13 +6,16 @@ import torch
 import src_plugins.face_restoration
 
 import src_plugins.sd1111_plugin.options
+from skimage._shared.version_requirements import is_installed
+
 from src_plugins import shared
-from src_core import devicelib
-from src_core.lib import modellib
-from src_core.classes.paths import modeldir
+from src import devicelib
+from src.lib import modellib
+from src.classes.paths import modeldir
 from shared import cmd_opts
 
-from src_core.installer import *
+from src.installer import *
+from src_plugins.flower.__install__ import repo_dir
 
 # codeformer people made a choice to include modified basicsr library to their project which makes
 # it utterly impossible to use it alongside with other libraries that also use basicsr, like GFPGAN.
@@ -36,7 +39,7 @@ def setup_model(dirname):
 
     try:
         from torchvision.transforms.functional import normalize
-        from src_core.plugins import CodeFormer
+        from src.plugins import CodeFormer
         from basicsr.utils.download_util import load_file_from_url
         from basicsr.utils import imwrite, img2tensor, tensor2img
         from facelib.utils.face_restoration_helper import FaceRestoreHelper

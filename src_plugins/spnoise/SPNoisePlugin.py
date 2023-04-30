@@ -3,10 +3,10 @@ import opensimplex
 from PIL import Image
 from skimage.util import random_noise
 
-from src_core.classes.convert import save_png
-from src_core.classes.JobArgs import JobArgs
-from src_core.classes.Plugin import Plugin
-from src_core.plugins import plugjob
+from src.classes.convert import save_png
+from src.classes.JobArgs import JobArgs
+from src.classes.Plugin import Plugin
+from src.plugins import plugjob
 
 
 class spnoise_job(JobArgs):

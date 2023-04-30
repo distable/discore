@@ -1,8 +1,8 @@
 # Installations
 # ----------------------------------------
-from src_core.installer import gitclone
+from src.installer import gitclone
 
-# from src_core.installing import gitclone
+# from src.installing import gitclone
 # gitclone("https://github.com/username/repo.git")
 gitclone("https://github.com/pengbo-learn/python-color-transfer")
 

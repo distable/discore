@@ -8,14 +8,14 @@ from basicsr.utils.download_util import load_file_from_url
 from tqdm import tqdm
 
 import src_plugins.sd1111_plugin.SDState
-from src_core.installer import mvfiles
-from src_core.lib import modellib
+from src.installer import mvfiles
+from src.lib import modellib
 from shared import opts, device
-from src_core.plugins import SwinIR as net
-from src_core.plugins import Swin2SR as net2
+from src.plugins import SwinIR as net
+from src.plugins import Swin2SR as net2
 from old.upscaler import Upscaler, UpscalerData
-from src_core.classes.paths import root, modeldir
-from src_core.classes.Plugin import Plugin
+from src.classes.paths import root, modeldir
+from src.classes.Plugin import Plugin
 
 precision_scope = (
     torch.autocast if src_plugins.sd1111_plugin.SDState.precision == "autocast" else contextlib.nullcontext

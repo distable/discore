@@ -1,4 +1,4 @@
-from src_core.classes.Plugin import Plugin
+from src.classes.Plugin import Plugin
 
 class KandinskyPlugin(Plugin):
     def title(self):

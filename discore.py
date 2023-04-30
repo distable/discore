@@ -11,7 +11,7 @@ import jargs
 from jargs import argp, args, spaced_args
 
 sys.path.append(Path(__file__).parent.as_posix())
-sys.path.append((Path(__file__).parent / 'src_core').as_posix())
+sys.path.append((Path(__file__).parent / 'src').as_posix())
 
 logging.captureWarnings(True)
 logging.getLogger("py.warnings").setLevel(logging.ERROR)
@@ -74,23 +74,23 @@ if not args.run:
 
 # ----------------------------------------
 
-# from src_core import renderer
-# from src_core.renderer import get_script_path, parse_action_script, render_frame, render_init, render_loop
-# from src_core import core
-# from src_core.classes import paths
-# from src_core.classes.logs import loglaunch, loglaunch_err
-# from src_core.classes.Session import Session
+# from src import renderer
+# from src.renderer import get_script_path, parse_action_script, render_frame, render_init, render_loop
+# from src import core
+# from src.classes import paths
+# from src.classes.logs import loglaunch, loglaunch_err
+# from src.classes.Session import Session
 
-from src_core.classes import paths
+from src.classes import paths
 
 def install_core():
     """
     Install all core requirements
     """
-    from installer import check_import
-    from installer import python
-    from installer import pipargs
-    from classes.printlib import printerr
+    from src.installer import check_import
+    from src.installer import python
+    from src.installer import pipargs
+    from src.lib.printlib import printerr
 
     torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113")
     clip_package = os.environ.get('CLIP_PACKAGE', "git+https://github.com/openai/CLIP.git@d50d76daa670286dd6cacf3bcd80b5e4823fc8e1")
@@ -103,6 +103,7 @@ def install_core():
     paths.sessions.mkdir(exist_ok=True)
 
     if not check_import("torch") or not check_import("torchvision"):
+        from src import installer
         installer.run(f'"{python}" -m {torch_command}', "Installing torch and torchvision", "Couldn't install torch")
 
     try:
@@ -116,8 +117,8 @@ def install_core():
         pipargs(f"install {clip_package}", "clip")
 
 def on_ctrl_c():
-    from src_core.classes.logs import logdiscore
-    import renderer
+    from src.classes.logs import logdiscore
+    from src import renderer
 
     logdiscore("Exiting because of Ctrl+C.")
     renderer.request_stop = True
@@ -126,9 +127,9 @@ def on_ctrl_c():
 
 def plugin_wizard():
     import shutil
-    from src_core import installer
+    from src import installer
     import re
-    from src_core.classes import paths
+    from src.classes import paths
     from art import text2art
 
     PLUGIN_TEMPLATE_PREFIX = ".template"
@@ -237,14 +238,14 @@ def print_possible_scripts():
 
 
 def print_existing_sessions():
-    from src_core.classes.Session import Session
+    from src.classes.Session import Session
     for file in paths.sessions.iterdir():
         s = Session(file, log=False)
         print(f"  {file.stem} ({str(s)})")
 
 def main():
-    from src_core.classes.logs import logdiscore_err
-    from src_core.classes.logs import logdiscore
+    from src.classes.logs import logdiscore_err
+    from src.classes.logs import logdiscore
     from yachalk import chalk
 
     if args.newplug:
@@ -258,7 +259,7 @@ def main():
         from deploy import deploy_vastai
         deploy_vastai()
     else:
-        from src_core.classes import common
+        from src.classes import common
         common.setup_ctrl_c(on_ctrl_c)
 
         if args.session == 'help' and args.action is None:
@@ -271,7 +272,7 @@ def main():
             print_possible_scripts()
             exit(0)
 
-        from src_core.classes.paths import parse_action_script
+        from src.classes.paths import parse_action_script
         a, sc = parse_action_script(args.action, DEFAULT_ACTION)
 
         logdiscore(chalk.green(f"action: {a}"))
@@ -296,7 +297,7 @@ def main():
 
             # By specifying this attribute, we can skip session loading when it's unnecessary to gain speed
 
-            # t = threading.Thread(target=src_core.renderer.start_mainloop)
+            # t = threading.Thread(target=src.renderer.start_mainloop)
             # t.start()
             amod.action(args)
 
@@ -319,11 +320,10 @@ def main():
 
 
 
-# from classes.printlib import cpuprofile
 # with cpuprofile():
 #     import pytorch_lightning as pl
 
-# from src_core.classes import printlib
+# from src.classes import printlib
 # import userconf
 #
 # printlib.print_timing = userconf.print_timing
@@ -331,11 +331,11 @@ def main():
 # printlib.print_gputrace = userconf.print_gputrace
 #
 # if userconf.print_extended_init:
-#     from src_core import installer
+#     from src import installer
 #     installer.print_info()
 #     print()
 
-from src_core import core
+from src import core
 core.setup_annoying_logging()
 
 main()
