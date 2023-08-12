@@ -9,9 +9,9 @@ class AudioPlayback:
         self.player = None
         self.paths = []
         self.markers = []
+        self.desired_name = ''
 
         # State
-        self.iwav = None  # index of the wav to play
         self.index_playback = 0
         self.index_marker = 0
         self.start_time = 0
@@ -66,9 +66,6 @@ class AudioPlayback:
 
             self.paths.append(p)
 
-    def set_wav(self, off):
-        self.iwav = np.clip(self.iwav + off, 0, len(self.paths) - 1)
-        self.refresh()
 
     def is_playing(self):
         from PyQt6.QtMultimedia import QMediaPlayer
@@ -79,51 +76,38 @@ class AudioPlayback:
         t = self.start_time + elapsed
         return t
 
-    def select(self, name):
-        def get_wavname_index(cname):
-            for i, n in enumerate(self.paths):
-                if n.stem in cname:
-                    return i
-
-        if len(self.paths) == 1:
-            # Auto match to the only cname
-            self.iwav = get_wavname_index(self.paths[0].stem)
-        else:
-            # Auto-match from mouse
-            self.iwav = get_wavname_index(name)
-
     def stop(self):
+        if len(self.requests) > 10: return
         self.requests.append(('stop',))
             # invoke_safe(self.on_playback_stop, self.start_time, self.end_time)
 
-    def play(self, t, iwav=None, filepath=None, with_event=True):
+    def play(self, t, name=None):
         if t is None: return
-
+        if len(self.requests) > 10: return
         if len(self.paths) == 0:
-            print("No audio files to play.")
+            # print("No audio files to play.")
             return
 
-        if not filepath:
-            iwav = iwav or self.iwav
-            if iwav is None:
-                iwav = 0
-            iwav = np.clip(iwav, 0, len(self.paths) - 1)
-            filepath = self.paths[iwav]
+        filepath = None
+        name = name or self.desired_name
+        if name:
+            # Search through our path stems
+            for p in self.paths:
+                if name in p.stem:
+                    filepath = p
+                    break
+        if filepath is None:
+            # Just play the first one
+            filepath = self.paths[0]
 
         self.start_time_wall = datetime.datetime.now()
         self.start_time = t
         self.requests.append(('play', filepath, t))
 
-
-        # if with_event:
-        #     invoke_safe(self.on_playback_start, t)
-
     def seek(self, t):
+        if len(self.requests) > 10: return
         if self.is_playing():
-            # self.stop()
-            # self.play(t, wav=self.playback_wav, with_event=False)
             self.requests.append(('seek', t))
-
 
 
     def refresh(self):
@@ -132,15 +116,11 @@ class AudioPlayback:
             self.play(self.get_playback_t())
 
     def flush_requests(self):
-        # self.player.setPosition(int(t * 1000))
-
-        # self.playback_wav = filepath
-        # self.player.setSource(QUrl.fromLocalFile(self.playback_wav.as_posix()))
-        # self.player.setPosition(int(t * 1000))
-        # self.player.play()
         from PyQt6.QtCore import QUrl
+        from PyQt6 import QtCore
 
         for request in self.requests:
+            # print(request)
             rtype = request[0]
             if rtype == 'stop':
                 self.end_time = self.get_playback_t()
@@ -150,7 +130,10 @@ class AudioPlayback:
                 t = request[2]
                 self.player.setSource(QUrl.fromLocalFile(filepath.as_posix()))
                 self.player.setPosition(int(t * 1000))
+
+                # Calling directly randomly crashes the application with no error o_O
                 self.player.play()
+                # QtCore.QTimer.singleShot(0, self.player.play)
             elif rtype == 'seek':
                 t = request[1]
                 self.player.setPosition(int(t * 1000))

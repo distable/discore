@@ -1,66 +1,49 @@
 import argparse
+import multiprocessing
 import os
 import pathlib
+import shlex
 import sys
-from fileinput import filename
+from pathlib import Path
 
 import PIL
 import scipy
+from python_color_transfer.color_transfer import ColorTransfer, Regrain
 from tqdm import tqdm
 
-from src.classes.JobArgs import JobArgs
-from src.classes.convert import load_pil, load_pilarr, save_jpg, save_npy, save_png
+from src import renderer
+from src.classes import paths
 from src.classes.Plugin import Plugin
-from src.installer import gitclone
-from src.plugins import plugjob
-from src.party.maths import clamp01
-from python_color_transfer.color_transfer import ColorTransfer, Regrain
-from pathlib import Path
-
-from src_plugins.opticalflow.__conf__ import half
-
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+from src.classes.Session import Session
+from src.classes.convert import load_pil, load_pilarr, save_npy, save_png, load_cv2, load_npy
+from src.lib import devices
 
 import torch
 import cv2
-from PIL import Image, ImageEnhance, ImageOps, ImageStat
+from PIL import Image, ImageOps
 from torch.nn import functional as F
-# from CLIP import clip
-import gc
-import os
 
-# NOTE: Turbo mode used to be blocked for anything but 3D mode
-# NOTE: VR mode used to be blocked for anything but 3D mode
+with_bidir = False
+with_occlusion = False
 
-is_colab = False
-root_dir = ""  # TODO colab VM root
-root_dir = os.getcwd()
-# width_height = [480, 270]  # @param{type: 'raw'}
-# width_height = [1024, 1024]  # @param{type: 'raw'}
-DEBUG = False
+
+def get_flow_paths(path_initframes):
+	dir_flow_fwd = path_initframes / 'flow_fwd'
+	dir_flow_bwd = path_initframes / 'flow_bwd'
+	dir_flow_occ_fwd = path_initframes / 'flow_occ_fwd'
+	dir_flow_occ_bwd = path_initframes / 'flow_occ_bwd'
+	return dir_flow_fwd, dir_flow_bwd, dir_flow_occ_fwd, dir_flow_occ_bwd
 
 
 def load_img(img, size, resize_mode='lanczos'):
-    if resize_mode == 'lanczos':
-        resize_mode = PIL.Image.LANCZOS
+	if resize_mode == 'lanczos':
+		resize_mode = PIL.Image.LANCZOS
 
-    img = PIL.Image.open(img).convert('RGB')
-    if img.size != size:
-        img = img.resize(size, resize_mode)
+	img = PIL.Image.open(img).convert('RGB')
+	if img.size != size:
+		img = img.resize(size, resize_mode)
 
-    return torch.from_numpy(np.array(img)).permute(2, 0, 1).float()[None, ...].cuda()
-
-
-def get_flow(frame1, frame2, model, iters=20, half=True):
-    # print(frame1.shape, frame2.shape)
-    padder = InputPadder(frame1.shape)
-    frame1, frame2 = padder.pad(frame1, frame2)
-    if half: frame1, frame2 = frame1.half(), frame2.half()
-    # print(frame1.shape, frame2.shape)
-    flow12 = model(frame1, frame2)
-    flow12 = flow12[0][0].permute(1, 2, 0).detach().cpu().numpy()
-
-    return flow12
+	return torch.from_numpy(np.array(img)).permute(2, 0, 1).float()[None, ...].cuda()
 
 
 # region Flow Visualization https://github.com/tomrunia/OpticalFlow_Visualization
@@ -82,111 +65,111 @@ import numpy as np
 
 
 def make_colorwheel():
-    """
-    Generates a color wheel for optical flow visualization as presented in:
-        Baker et al. "A Database and Evaluation Methodology for Optical Flow" (ICCV, 2007)
-        URL: http://vision.middlebury.edu/flow/flowEval-iccv07.pdf
-    Code follows the original C++ source code of Daniel Scharstein.
-    Code follows the the Matlab source code of Deqing Sun.
-    Returns:
-        np.ndarray: Color wheel
-    """
+	"""
+	Generates a color wheel for optical flow visualization as presented in:
+		Baker et al. "A Database and Evaluation Methodology for Optical Flow" (ICCV, 2007)
+		URL: http://vision.middlebury.edu/flow/flowEval-iccv07.pdf
+	Code follows the original C++ source code of Daniel Scharstein.
+	Code follows the the Matlab source code of Deqing Sun.
+	Returns:
+		np.ndarray: Color wheel
+	"""
 
-    RY = 15
-    YG = 6
-    GC = 4
-    CB = 11
-    BM = 13
-    MR = 6
+	RY = 15
+	YG = 6
+	GC = 4
+	CB = 11
+	BM = 13
+	MR = 6
 
-    ncols = RY + YG + GC + CB + BM + MR
-    colorwheel = np.zeros((ncols, 3))
-    col = 0
+	ncols = RY + YG + GC + CB + BM + MR
+	colorwheel = np.zeros((ncols, 3))
+	col = 0
 
-    # RY
-    colorwheel[0:RY, 0] = 255
-    colorwheel[0:RY, 1] = np.floor(255 * np.arange(0, RY) / RY)
-    col = col + RY
-    # YG
-    colorwheel[col:col + YG, 0] = 255 - np.floor(255 * np.arange(0, YG) / YG)
-    colorwheel[col:col + YG, 1] = 255
-    col = col + YG
-    # GC
-    colorwheel[col:col + GC, 1] = 255
-    colorwheel[col:col + GC, 2] = np.floor(255 * np.arange(0, GC) / GC)
-    col = col + GC
-    # CB
-    colorwheel[col:col + CB, 1] = 255 - np.floor(255 * np.arange(CB) / CB)
-    colorwheel[col:col + CB, 2] = 255
-    col = col + CB
-    # BM
-    colorwheel[col:col + BM, 2] = 255
-    colorwheel[col:col + BM, 0] = np.floor(255 * np.arange(0, BM) / BM)
-    col = col + BM
-    # MR
-    colorwheel[col:col + MR, 2] = 255 - np.floor(255 * np.arange(MR) / MR)
-    colorwheel[col:col + MR, 0] = 255
-    return colorwheel
+	# RY
+	colorwheel[0:RY, 0] = 255
+	colorwheel[0:RY, 1] = np.floor(255 * np.arange(0, RY) / RY)
+	col = col + RY
+	# YG
+	colorwheel[col:col + YG, 0] = 255 - np.floor(255 * np.arange(0, YG) / YG)
+	colorwheel[col:col + YG, 1] = 255
+	col = col + YG
+	# GC
+	colorwheel[col:col + GC, 1] = 255
+	colorwheel[col:col + GC, 2] = np.floor(255 * np.arange(0, GC) / GC)
+	col = col + GC
+	# CB
+	colorwheel[col:col + CB, 1] = 255 - np.floor(255 * np.arange(CB) / CB)
+	colorwheel[col:col + CB, 2] = 255
+	col = col + CB
+	# BM
+	colorwheel[col:col + BM, 2] = 255
+	colorwheel[col:col + BM, 0] = np.floor(255 * np.arange(0, BM) / BM)
+	col = col + BM
+	# MR
+	colorwheel[col:col + MR, 2] = 255 - np.floor(255 * np.arange(MR) / MR)
+	colorwheel[col:col + MR, 0] = 255
+	return colorwheel
 
 
 def flow_uv_to_colors(u, v, convert_to_bgr=False):
-    """
-    Applies the flow color wheel to (possibly clipped) flow components u and v.
-    According to the C++ source code of Daniel Scharstein
-    According to the Matlab source code of Deqing Sun
-    Args:
-        u (np.ndarray): Input horizontal flow of shape [H,W]
-        v (np.ndarray): Input vertical flow of shape [H,W]
-        convert_to_bgr (bool, optional): Convert output image to BGR. Defaults to False.
-    Returns:
-        np.ndarray: Flow visualization image of shape [H,W,3]
-    """
-    flow_image = np.zeros((u.shape[0], u.shape[1], 3), np.uint8)
-    colorwheel = make_colorwheel()  # shape [55x3]
-    ncols = colorwheel.shape[0]
-    rad = np.sqrt(np.square(u) + np.square(v))
-    a = np.arctan2(-v, -u) / np.pi
-    fk = (a + 1) / 2 * (ncols - 1)
-    k0 = np.floor(fk).astype(np.int32)
-    k1 = k0 + 1
-    k1[k1 == ncols] = 0
-    f = fk - k0
-    for i in range(colorwheel.shape[1]):
-        tmp = colorwheel[:, i]
-        col0 = tmp[k0] / 255.0
-        col1 = tmp[k1] / 255.0
-        col = (1 - f) * col0 + f * col1
-        idx = (rad <= 1)
-        col[idx] = 1 - rad[idx] * (1 - col[idx])
-        col[~idx] = col[~idx] * 0.75  # out of range
-        # Note the 2-i => BGR instead of RGB
-        ch_idx = 2 - i if convert_to_bgr else i
-        flow_image[:, :, ch_idx] = np.floor(255 * col)
-    return flow_image
+	"""
+	Applies the flow color wheel to (possibly clipped) flow components u and v.
+	According to the C++ source code of Daniel Scharstein
+	According to the Matlab source code of Deqing Sun
+	Args:
+		u (np.ndarray): Input horizontal flow of shape [H,W]
+		v (np.ndarray): Input vertical flow of shape [H,W]
+		convert_to_bgr (bool, optional): Convert output image to BGR. Defaults to False.
+	Returns:
+		np.ndarray: Flow visualization image of shape [H,W,3]
+	"""
+	flow_image = np.zeros((u.shape[0], u.shape[1], 3), np.uint8)
+	colorwheel = make_colorwheel()  # shape [55x3]
+	ncols = colorwheel.shape[0]
+	rad = np.sqrt(np.square(u) + np.square(v))
+	a = np.arctan2(-v, -u) / np.pi
+	fk = (a + 1) / 2 * (ncols - 1)
+	k0 = np.floor(fk).astype(np.int32)
+	k1 = k0 + 1
+	k1[k1 == ncols] = 0
+	f = fk - k0
+	for i in range(colorwheel.shape[1]):
+		tmp = colorwheel[:, i]
+		col0 = tmp[k0] / 255.0
+		col1 = tmp[k1] / 255.0
+		col = (1 - f) * col0 + f * col1
+		idx = (rad <= 1)
+		col[idx] = 1 - rad[idx] * (1 - col[idx])
+		col[~idx] = col[~idx] * 0.75  # out of range
+		# Note the 2-i => BGR instead of RGB
+		ch_idx = 2 - i if convert_to_bgr else i
+		flow_image[:, :, ch_idx] = np.floor(255 * col)
+	return flow_image
 
 
 def flow_to_image(flow_uv, clip_flow=None, convert_to_bgr=False):
-    """
-    Expects a two dimensional flow image of shape.
-    Args:
-        flow_uv (np.ndarray): Flow UV image of shape [H,W,2]
-        clip_flow (float, optional): Clip maximum of flow values. Defaults to None.
-        convert_to_bgr (bool, optional): Convert output image to BGR. Defaults to False.
-    Returns:
-        np.ndarray: Flow visualization image of shape [H,W,3]
-    """
-    assert flow_uv.ndim == 3, 'input flow must have three dimensions'
-    assert flow_uv.shape[2] == 2, 'input flow must have shape [H,W,2]'
-    if clip_flow is not None:
-        flow_uv = np.clip(flow_uv, 0, clip_flow)
-    u = flow_uv[:, :, 0]
-    v = flow_uv[:, :, 1]
-    rad = np.sqrt(np.square(u) + np.square(v))
-    rad_max = np.max(rad)
-    epsilon = 1e-5
-    u = u / (rad_max + epsilon)
-    v = v / (rad_max + epsilon)
-    return flow_uv_to_colors(u, v, convert_to_bgr)
+	"""
+	Expects a two dimensional flow image of shape.
+	Args:
+		flow_uv (np.ndarray): Flow UV image of shape [H,W,2]
+		clip_flow (float, optional): Clip maximum of flow values. Defaults to None.
+		convert_to_bgr (bool, optional): Convert output image to BGR. Defaults to False.
+	Returns:
+		np.ndarray: Flow visualization image of shape [H,W,3]
+	"""
+	assert flow_uv.ndim == 3, 'input flow must have three dimensions'
+	assert flow_uv.shape[2] == 2, 'input flow must have shape [H,W,2]'
+	if clip_flow is not None:
+		flow_uv = np.clip(flow_uv, 0, clip_flow)
+	u = flow_uv[:, :, 0]
+	v = flow_uv[:, :, 1]
+	rad = np.sqrt(np.square(u) + np.square(v))
+	rad_max = np.max(rad)
+	epsilon = 1e-5
+	u = u / (rad_max + epsilon)
+	v = v / (rad_max + epsilon)
+	return flow_uv_to_colors(u, v, convert_to_bgr)
 
 
 # endregion
@@ -242,9 +225,9 @@ colormatch_offset = 0  # @param {'type':'number'}
 colormatch_method = 'LAB'  # @param ['LAB', 'PDF', 'mean']
 colormatch_method_fn = PT.lab_transfer
 if colormatch_method == 'LAB':
-    colormatch_method_fn = PT.pdf_transfer
+	colormatch_method_fn = PT.pdf_transfer
 if colormatch_method == 'mean':
-    colormatch_method_fn = PT.mean_std_transfer
+	colormatch_method_fn = PT.mean_std_transfer
 # @markdown Match source frame's texture
 colormatch_regrain = False  # @param {'type':'boolean'}
 
@@ -275,661 +258,689 @@ turbo_mode = False  # @param {type:"boolean"}
 turbo_steps = "3"  # @param ["2","3","4","5","6"] {type:"string"}
 turbo_preroll = 1  # frames
 
-class flow_job(JobArgs):
-    def __init__(self,
-                 name=None,
-                 nth=1,
-                 strength=1.0,
-                 padmode='reflect', # [reflect, edge, wrap]
-                 padpct=0.2,  # Increase padding if you have a shaky\moving camera footage and are getting black borders.
-                 consistency=True,
-                 loop=False,
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.name = name
-        self.nth = nth
-        self.consistency = consistency
-        self.strength = strength
-        self.padmode = padmode
-        self.padpct = padpct
-        self.loop = loop
-
-
-class flowinit_job(flow_job):
-    def __init__(self,
-                 force=False,
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.force = force
-    pass
-
-
-class flowsetup_job(flow_job):
-    pass
-
-
-class consistency_job(flow_job):
-    def __init__(self,
-                 image=None,  # The image to remain consistent with, usually the previous frame
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.image = image
-
-
-class ccblend_job(JobArgs):
-    def __init__(self,
-                 name:str=None, img: str=None, flow: str=None,
-                 t: float=0.5,
-                 ccblur:int=2,
-                 ccstrength:float=1.0,
-                 cccolor:float=1.0,
-                 reverse: bool = False,
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.name = name
-        self.img = img or name or flow
-        self.flow = flow or name or img
-        self.t = t
-        self.ccblur = ccblur
-        self.ccstrength = ccstrength
-        self.cccolor = cccolor
-        self.reverse = reverse
-
 
 class OpticalflowPlugin(Plugin):
-    def title(self):
-        return "opticalflow"
+	def __init__(self, dirpath: Path = None, id: str = None):
+		super().__init__(dirpath, id)
+		self.gmflow_model = None
 
-    def describe(self):
-        return ""
+	def title(self):
+		return "opticalflow"
 
-    def init(self):
-        pass
+	def describe(self):
+		return ""
 
-    def install(self):
-        gitclone('https://github.com/princeton-vl/RAFT')
-        gitclone('https://github.com/Sxela/WarpFusion', into_dir=self.res())
-        gitclone('https://github.com/Sxela/flow_tools', into_dir=self.res())
+	def init(self):
+		sys.path.append(self.repo('RAFT').as_posix())
+		sys.path.append(self.repo('RAFT/core').as_posix())
 
-        sys.path.append(self.repo('RAFT').as_posix())
-        sys.path.append(self.repo('RAFT/core').as_posix())
+	def precompute(self, resname='init', force=False):
+		session = renderer.session
 
-        # TODO
-        # !pip install av pims
+		path_initframes = renderer.session.extract_frames(resname)
+		dir_flow_fwd, \
+			dir_flow_bwd, \
+			dir_flow_occ_bwd, \
+			dir_flow_occ_fwd = get_flow_paths(path_initframes)
 
-        # TODO
-        # !git clone https://github.com/Sxela/RobustVideoMattingCLI
+		paths.mktree(dir_flow_fwd)
+		if with_bidir:
+			paths.mktree(dir_flow_bwd)
+		if with_occlusion:
+			paths.mktree(dir_flow_occ_fwd)
+			paths.mktree(dir_flow_occ_bwd)
 
-        # TODO
-        # install ffmpeg
+		# CREATE FLOW DATA
+		# ------------------------------------------------------------
+		flows = list(dir_flow_fwd.glob('*.npy'))
 
-    def uninstall(self):
-        pass
+		frame_paths = sorted(path_initframes.glob('*.jpg'))
+		if len(frame_paths) < 2:
+			print(f'WARNING!\nCannot create flow maps: Found {len(frame_paths)} framepaths extracted from your video input.\nPlease check your video path.')
 
-    def load(self):
-        pass
+		if len(flows) == len(frame_paths) - 1:
+			print("All flow maps already computed.")
+			return
 
-    def unload(self):
-        pass
+		if len(frame_paths) < 2:
+			print("Only 1 frame.")
+			return
 
-    @plugjob(key='devdef_flow')
-    def flow_init(self, j: flowinit_job):
-        from core.raft import RAFT
+		parser = argparse.ArgumentParser()
+		parser.add_argument('--model', help="restore checkpoint")
+		parser.add_argument('--dataset', help="dataset for evaluation")
+		parser.add_argument('--small', action='store_true', help='use small model')
+		parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
+		parser.add_argument('--alternate_corr', action='store_true', help='use efficent correlation implementation')
+		args = parser.parse_args(['--mixed_precision'])
 
-        # path_initframes = j.session.extract_frames(j.vidname, j.init_video_nth, start_frame, end_frame)
-        path_flowframes = j.session.extract_frames(j.name, j.nth)
+		for f in pathlib.Path(f'{dir_flow_bwd}').glob('*.*'):
+			f.unlink()
 
-        # TODO This probably warrants its own job or plugin even. Separation of concerns
-        # if j.bg_mask:
-        #     extract_frames(j.mask_path, f"{path_vidframes_mask()}", extract_nth_frame, start_frame, end_frame)
-        #     os.system(f'python "{root_dir}/RobustVideoMattingCLI/rvm_cli.py" --input_path "{path_vidframes_mask()}" --output_alpha "{path_alpha_vid}"')
-        #     extract_frames(path_alpha_vid, f"{path_alpha_vidframes}", 1, 0, 999999999)
-        # else:
-        #     pass  # TODO
-        # path_alpha_vid = j.session.res('alpha.mp4')
-        # if path_alpha_vid.exists():
-        #     path_alpha_vidframes = j.session.extract_frames(path_alpha_vid, j.init_flow_nth, start_frame, end_frame)
+		pairs = list(session.res_frameiter_pairs(path_initframes, load=False))
+		pairs = []
+		for p in pairs:
+			if not p[3].with_suffix('.jpg').exists():
+				pairs.append(p)
+		if len(pairs) == 0:
+			print("All flow maps already computed.")
+			return
 
-        path_raft_half = self.res('WarpFusion/raft/raft_half.jit')
-        path_raft_full = self.res('WarpFusion/raft/raft_fp32.jit')
-        temp_flo = path_flowframes / '_temp_flo'
-        dir_flow21 = path_flowframes / 'flow21'  # _out_flo_fwd
-        dir_flow12 = path_flowframes / 'flow12'  # _out_flo_bck
-        dir_flowcc21 = path_flowframes / 'flowcc21'
-        dir_flowcc12 = path_flowframes / 'flowcc12'
+		num_processes = 3
+		num_processes = min(len(pairs) - num_processes, num_processes)
+		with tqdm(total=len(pairs),
+		          desc=f'Generating optical flow maps with {num_processes} processes',
+		          unit='frames') as pbar:
+			pool = multiprocessing.Pool(processes=num_processes, initializer=process_create, initargs=[path_initframes])
+			jobs = []
+			for pair in pairs:
+				result = pool.apply_async(process_pair, pair)
+				jobs.append(result)
+			pool.close()
 
-        dir_flowcc21.mkdir(parents=True, exist_ok=True)
-        dir_flowcc12.mkdir(parents=True, exist_ok=True)
-        dir_flow21.mkdir(parents=True, exist_ok=True)
-        dir_flow12.mkdir(parents=True, exist_ok=True)
-        cc_path = self.res('flow_tools/check_consistency.py')
+			for result in jobs:
+				try:
+					result.get()
+				except Exception as e:
+					pass
+				pbar.update(1)
 
-        # CREATE FLOW DATA
-        # ------------------------------------------------------------
-        flows = list(dir_flow21.glob('*.*'))
+			pool.join()
 
-        if len(flows) == 0 or j.force:
-            # Delete existing flow data
-            for d in [dir_flow21, dir_flow12, dir_flowcc21, dir_flowcc12]:
-                for f in d.glob('*.*'):
-                    f.unlink()
+		frame_paths = sorted(path_initframes.glob('*.*'))
+		if len(frame_paths) == 0:
+			sys.exit("ERROR: 0 framepaths found.\nPlease check your video input path and rerun the video settings cell.")
 
-            frames = sorted(path_flowframes.glob('*.*'))
-            if len(frames) < 2:
-                print(f'WARNING!\nCannot create flow maps: Found {len(frames)} frames extracted from your video input.\nPlease check your video path.')
+		flows = list(dir_flow_bwd.glob('*.*'))
+		if len(flows) == 0:
+			sys.exit("ERROR: 0 flow files found.\nPlease rerun the flow generation cell.")
 
-            if len(frames) >= 2:
-                parser = argparse.ArgumentParser()
-                parser.add_argument('--model', help="restore checkpoint")
-                parser.add_argument('--dataset', help="dataset for evaluation")
-                parser.add_argument('--small', action='store_true', help='use small model')
-                parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
-                parser.add_argument('--alternate_corr', action='store_true', help='use efficent correlation implementation')
-                args = parser.parse_args()
+	def flow_setup(self):
+		frame_num = renderer.session.f
+		session = renderer.session
+		img = renderer.rv.img
 
-                if half:
-                    raft_model = torch.jit.load(path_raft_half).eval()
-                    # raft_model = torch.nn.DataParallel(RAFT(args2))
-                else:
-                    # raft_model = torch.jit.load(path_raft_full).eval()
-                    raft_model = torch.nn.DataParallel(RAFT(args))
-                    raft_model.load_state_dict(torch.load(self.res('raft-things.pth')))
-                    raft_model = raft_model.module.cuda().eval()
+		if frame_num == 0 and use_background_mask:
+			img = apply_mask(session, img, frame_num, background, background_source, invert_mask)
 
-                for f in pathlib.Path(f'{dir_flow21}').glob('*.*'):
-                    f.unlink()
+		return img
 
-                with torch.no_grad():
-                    for frame1, frame2 in tqdm(zip(frames[:-1], frames[1:]), total=len(frames) - 1):
-                        in_frame1 = Path(frame1)
-                        in_frame2 = Path(frame2)
-                        out_flow21 = dir_flow21 / in_frame1.stem
-                        out_flow12 = dir_flow12 / in_frame1.stem
+	def fetch_flow(self, resname):
+		session = renderer.session
+		rv = renderer.rv
 
-                        frame1 = load_img(in_frame1, (j.session.width, j.session.height))
-                        frame2 = load_img(in_frame2, (j.session.width, j.session.height))
+		dir_frames = session.res_frame_dirpath(resname)
+		path_flow = Session(dir_frames).res_frame('flow_fwd', rv.f, ext='npy')
+		flow = load_npy(path_flow)
+		return flow
 
-                        flow21 = get_flow(frame2, frame1, raft_model, half=half)
-                        flow21pil = PIL.Image.fromarray(flow_to_image(flow21))
-                        save_npy(out_flow21, flow21)
-                        save_png(flow21pil, out_flow21)
+	def flow(self, resname,
+	         padmode='reflect',
+	         padpct=0.1,
+	         strength=1.0):
+		rv = renderer.rv
+		animpil = renderer.rv.image
+		flowpath = renderer.session.res_frame(f'.{resname}', rv.f, subdir='flow_fwd', ext='npy')
+		warped = warp(animpil, flowpath,
+		              padmode=padmode,
+		              padpct=padpct,
+		              multiplier=strength)
 
-                        flow12 = get_flow(frame1, frame2, raft_model, half=half)
-                        flow12pil = PIL.Image.fromarray(flow_to_image(flow12))
-                        save_npy(out_flow12, flow12)
-                        save_png(flow12pil, out_flow12)
-                        gc.collect()
+		return warped
 
-                del raft_model
-                gc.collect()
-                fwd = f"{dir_flow21}/*.npy"
-                bwd = f"{dir_flow12}/*.npy"
-                os.system(f'python "{cc_path}" --flow_fwd "{fwd}" --flow_bwd "{bwd}" --output "{dir_flowcc21}/" --image_output --output_postfix="" --blur=0. --save_separate_channels --skip_numpy_output')
-                os.system(f'python "{cc_path}" --flow_fwd "{bwd}" --flow_bwd "{fwd}" --output "{dir_flowcc12}/" --image_output --output_postfix="" --blur=0. --save_separate_channels --skip_numpy_output')
+	def ccblend(self,
+	            name: str = None, img: str = None, flow: str = None,
+	            t: float = 0.5,
+	            ccblur: int = 2,
+	            ccstrength: float = 1.0,
+	            cccolor: float = 1.0,
+	            reverse: bool = False,
+	            **kwargs):
+		session = renderer.session
 
-        frames = sorted(path_flowframes.glob('*.*'))
-        if len(frames) == 0:
-            sys.exit("ERROR: 0 frames found.\nPlease check your video input path and rerun the video settings cell.")
+		img1 = renderer.rv.img
+		img2 = session.res_framepil(img, resize=True)
+		ccpath = get_consistency_path(session, flow, reverse=reverse)
 
-        flows = list(dir_flow21.glob('*.*'))
-        if len(flows) == 0:
-            sys.exit("ERROR: 0 flow files found.\nPlease rerun the flow generation cell.")
+		blended = blend(img1, img2, t,
+		                ccpath=ccpath, ccstrength=ccstrength, ccblur=ccblur, cccolor=cccolor)
 
-    @plugjob(key='devdef_flow')
-    def flow_setup(self, j: flowsetup_job):
-        frame_num = j.session.f
-        img = j.session.image
+		if session.f == 1:
+			return blended
 
-        if frame_num == 0 and use_background_mask:
-            img = apply_mask(j.session, img, frame_num, background, background_source, invert_mask)
+		if mask_result:
+			imgprev = session.res_framepil(session.f - 1, resize=True)
 
-        return img
+			diffuse_inpaint_mask_blur = 15
+			diffuse_inpaint_mask_thresh = 220
 
-    @plugjob(key='devdef_flow')
-    def flow(self, j: flow_job):
-        animpil = j.session.image
-        flowpath = j.session.res_frame(j.name, 'flow21', ext='npy')
+			consistency_mask = load_cc(ccpath, blur=ccblur)
+			consistency_mask = cv2.GaussianBlur(consistency_mask, (diffuse_inpaint_mask_blur, diffuse_inpaint_mask_blur), cv2.BORDER_DEFAULT)
+			consistency_mask = np.where(consistency_mask < diffuse_inpaint_mask_thresh / 255., 0, 1.)
+			consistency_mask = cv2.GaussianBlur(consistency_mask, (3, 3), cv2.BORDER_DEFAULT)
 
-        # if use_background_mask and not apply_mask_after_warp:
-        #     # if turbo_mode & (f % int(turbo_steps) != 0):
-        #     #   print('disabling mask for turbo step, will be applied during turbo blend')
-        #     # else:
-        #     print('creating bg mask for frame ', f)
-        #     initpil = apply_mask(j.session, initpil, f, background, background_source, invert_mask)
-        #     # initpil.save(f'frame2_{f}.jpg')
+			# consistency_mask = torchvision.transforms.functional.resize(consistency_mask, image.size)
+			print(imgprev.size, consistency_mask.shape, blended.size)
+			cc_sz = consistency_mask.shape[1], consistency_mask.shape[0]
+			image_masked = np.array(blended) * (1 - consistency_mask) + np.array(imgprev) * consistency_mask
 
-        warped = warp(animpil, flowpath,
-                      padmode=j.padmode,
-                      padpct=j.padpct,
-                      multiplier=j.strength)
+			# image_masked = np.array(image.resize(cc_sz, warp_interp))*(1-consistency_mask) + np.array(init_img_prev.resize(cc_sz, warp_interp))*(consistency_mask)
+			image_masked = PIL.Image.fromarray(image_masked.round().astype('uint8'))
+			# image = image_masked.resize(image.size, warp_interp)
+			image = image_masked
 
-        # warped = warped.resize((side_x,side_y), warp_interp)
-        # if use_background_mask and apply_mask_after_warp:
-        #     # if turbo_mode & (f % int(turbo_steps) != 0):
-        #     #   print('disabling mask for turbo step, will be applied during turbo blend')
-        #     #   return warped
-        #     print('creating bg mask for frame ', f)
-        #     warped = apply_mask(j.session, warped, f, background, background_source, invert_mask)
+		return blended
 
-        return warped
-
-    @plugjob(key='devdef_flow')
-    def ccblend(self, j: ccblend_job):
-        img1 = j.session.image
-        img2 = j.session.res_framepil(j.img, ctxsize=True)
-        ccpath = get_consistency_path(j.session, j.flow, reverse=j.reverse)
-
-        blended = blend(img1, img2, j.t,
-                     ccpath=ccpath, ccstrength=j.ccstrength, ccblur=j.ccblur, cccolor=j.cccolor)
-
-        if j.session.f == 1:
-            return blended
-
-        if mask_result:
-            imgprev =  j.session.res_framepil(j.session.f - 1, ctxsize=True)
-
-            diffuse_inpaint_mask_blur = 15
-            diffuse_inpaint_mask_thresh = 220
-
-            consistency_mask = load_cc(ccpath, blur=j.ccblur)
-            consistency_mask = cv2.GaussianBlur(consistency_mask, (diffuse_inpaint_mask_blur, diffuse_inpaint_mask_blur), cv2.BORDER_DEFAULT)
-            consistency_mask = np.where(consistency_mask < diffuse_inpaint_mask_thresh / 255., 0, 1.)
-            consistency_mask = cv2.GaussianBlur(consistency_mask, (3, 3), cv2.BORDER_DEFAULT)
-
-            # consistency_mask = torchvision.transforms.functional.resize(consistency_mask, image.size)
-            print(imgprev.size, consistency_mask.shape, blended.size)
-            cc_sz = consistency_mask.shape[1], consistency_mask.shape[0]
-            image_masked = np.array(blended) * (1 - consistency_mask) + np.array(imgprev) * consistency_mask
-
-            # image_masked = np.array(image.resize(cc_sz, warp_interp))*(1-consistency_mask) + np.array(init_img_prev.resize(cc_sz, warp_interp))*(consistency_mask)
-            image_masked = PIL.Image.fromarray(image_masked.round().astype('uint8'))
-            # image = image_masked.resize(image.size, warp_interp)
-            image = image_masked
-
-        return blended
-
-
-@plugjob(key='devdef_flow')
-def consistency(self, j: consistency_job):
-    if not j.session.image: return
-    image = j.session.image
-    f = j.session.f
-    ccpath = j.session.res_frame(j.name, f, 'flowcc21')
-
-    return image
+	def consistency(self, image, resname):
+		session = renderer.session
+		f = session.f
+		ccpath = session.res_frame(resname, f, 'flowcc21')
+		# TODO
+		return image
 
 
 def get_consistency_path(session, resname, reverse=False):
-    fwd = session.res_frame(resname, 'flowcc21')
-    bwd = session.res_frame(resname, 'flowcc12')
+	fwd = session.res_frame(resname, 'flowcc21')
+	bwd = session.res_frame(resname, 'flowcc12')
 
-    if reverse:
-        return bwd
-    else:
-        return fwd
-
-
-class InputPadder:
-    """ Pads images such that dimensions are divisible by 8 """
-
-    def __init__(self, dims, mode='sintel'):
-        self.ht, self.wd = dims[-2:]
-        pad_ht = (((self.ht // 8) + 1) * 8 - self.ht) % 8
-        pad_wd = (((self.wd // 8) + 1) * 8 - self.wd) % 8
-        if mode == 'sintel':
-            self._pad = [pad_wd // 2, pad_wd - pad_wd // 2, pad_ht // 2, pad_ht - pad_ht // 2]
-        else:
-            self._pad = [pad_wd // 2, pad_wd - pad_wd // 2, 0, pad_ht]
-
-    def pad(self, *inputs):
-        return [F.pad(x, self._pad, mode='replicate') for x in inputs]
-
-    def unpad(self, x):
-        ht, wd = x.shape[-2:]
-        c = [self._pad[2], ht - self._pad[3], self._pad[0], wd - self._pad[1]]
-        return x[..., c[0]:c[1], c[2]:c[3]]
-
-
-def warp_flow(img, flow, mul=1.):
-    h, w = flow.shape[:2]
-    flow = flow.copy()
-    flow[:, :, 0] += np.arange(w)
-    flow[:, :, 1] += np.arange(h)[:, np.newaxis]
-    # print('flow stats', flow.max(), flow.min(), flow.mean())
-    # print(flow)
-    flow *= mul
-    # print('flow stats mul', flow.max(), flow.min(), flow.mean())
-    # res = cv2.remap(img, flow, None, cv2.INTER_LINEAR)
-    res = cv2.remap(img, flow, None, cv2.INTER_LANCZOS4)
-
-    return res
-
-
-def makeEven(_x):
-    return _x if (_x % 2 == 0) else _x + 1
-
-
-def fit(img, maxsize=512):
-    maxdim = max(*img.size)
-    if maxdim > maxsize:
-        # if True:
-        ratio = maxsize / maxdim
-        x, y = img.size
-        size = (makeEven(int(x * ratio)), makeEven(int(y * ratio)))
-        img = img.resize(size, warp_interp)
-    return img
+	if reverse:
+		return bwd
+	else:
+		return fwd
 
 
 def warp(framepil, flowpath,
          padmode='reflect', padpct=0.1,
          multiplier=1.0):
-    flow21 = np.load(flowpath)
-    framearr = load_pilarr(framepil)
+	flow21 = np.load(flowpath)
+	framearr = load_pilarr(framepil)
 
-    pad = int(max(flow21.shape) * padpct)
-    flow21 = np.pad(flow21, pad_width=((pad, pad), (pad, pad), (0, 0)), mode='constant')
-    framearr = np.pad(framearr, pad_width=((pad, pad), (pad, pad), (0, 0)), mode=padmode)
+	pad = int(max(flow21.shape) * padpct)
+	flow21 = np.pad(flow21, pad_width=((pad, pad), (pad, pad), (0, 0)), mode='constant')
+	framearr = np.pad(framearr, pad_width=((pad, pad), (pad, pad), (0, 0)), mode=padmode)
 
-    warpedarr21 = warp_flow(framearr, flow21, multiplier)
-    warpedarr21 = warpedarr21[pad:warpedarr21.shape[0] - pad, pad:warpedarr21.shape[1] - pad, :]
+	h, w = flow21.shape[:2]
+	flow = flow21.copy()
+	flow21[:, :, 0] += np.arange(w)
+	flow21[:, :, 1] += np.arange(h)[:, np.newaxis]
+	# print('flow stats', flow.max(), flow.min(), flow.mean())
+	# print(flow)
+	flow21 *= multiplier
+	# print('flow stats mul', flow.max(), flow.min(), flow.mean())
+	# res = cv2.remap(img, flow, None, cv2.INTER_LINEAR)
+	res = cv2.remap(framearr, flow21, None, cv2.INTER_LANCZOS4)
+	warpedarr21 = res
+	warpedarr21 = warpedarr21[pad:warpedarr21.shape[0] - pad, pad:warpedarr21.shape[1] - pad, :]
 
-    return PIL.Image.fromarray(warpedarr21.round().astype('uint8'))
+	return PIL.Image.fromarray(warpedarr21.round().astype('uint8'))
 
 
 def blend(img1, img2, t=0.5,
           ccpath=None, ccstrength=0.0, ccblur=2, cccolor=0.0,
-          padmode='reflect', padpct=0.0)->Image.Image:
-    """
+          padmode='reflect', padpct=0.0) -> Image.Image:
+	"""
 
-    Args:
-        img1: The start image.
-        img2: The goal image.
-        t: How much to blend the two images. 0.0 is all img1, 1.0 is all img2.
-        ccpath: The path to the consistency mask.
-        ccstrength: How much of the consistency mask to use.
-        ccblur: Blur radius to soften the consistency mask. (Softens transition between raw video init and stylized frames in occluded areas)
-        cccolor: Match color of inconsistent areas to unoccluded ones, after inconsistent areas were replaced with raw init video or inpainted. 0 to disable, 0 to 1 for strength.
-        padmode: The padding mode to use.
-        padpct: The padding percentage to use.
+	Args:
+		img1: The start image.
+		img2: The goal image.
+		t: How much to blend the two images. 0.0 is all img1, 1.0 is all img2.
+		ccpath: The path to the consistency mask.
+		ccstrength: How much of the consistency mask to use.
+		ccblur: Blur radius to soften the consistency mask. (Softens transition between raw video init and stylized frames in occluded areas)
+		cccolor: Match color of inconsistent areas to unoccluded ones, after inconsistent areas were replaced with raw init video or inpainted. 0 to disable, 0 to 1 for strength.
+		padmode: The padding mode to use.
+		padpct: The padding percentage to use.
 
-    Returns: The blended image.
+	Returns: The blended image.
 
-    """
+	"""
 
-    img1 = load_pilarr(img1)
-    pad = int(max(img1.shape) * padpct)
+	img1 = load_pilarr(img1)
+	pad = int(max(img1.shape) * padpct)
 
-    img2 = load_pilarr(img2, size=(img1.shape[1] - pad * 2, img1.shape[0] - pad * 2))
-    # initarr = np.array(img2.convert('RGB').resize((flow21.shape[1] - pad * 2, flow21.shape[0] - pad * 2), warp_interp))
-    t = 1.0
+	img2 = load_pilarr(img2, size=(img1.shape[1] - pad * 2, img1.shape[0] - pad * 2))
+	# initarr = np.array(img2.convert('RGB').resize((flow21.shape[1] - pad * 2, flow21.shape[0] - pad * 2), warp_interp))
+	t = 1.0
 
-    if ccpath:
-        ccweights = load_cc(ccpath, blur=ccblur)
-        if cccolor:
-            img2 = match_color(img1, img2, blend=cccolor)
+	if ccpath:
+		ccweights = load_cc(ccpath, blur=ccblur)
+		if cccolor:
+			img2 = match_color(img1, img2, blend=cccolor)
 
-        ccweights = ccweights.clip(1 - ccstrength, 1.)
-        blended_w = img2 * (1 - t) + t * (img1 * ccweights + img2 * (1 - ccweights))
-    else:
-        if cccolor:
-            img2 = match_color(img1, img2, blend=cccolor)
+		ccweights = ccweights.clip(1 - ccstrength, 1.)
+		blended_w = img2 * (1 - t) + t * (img1 * ccweights + img2 * (1 - ccweights))
+	else:
+		if cccolor:
+			img2 = match_color(img1, img2, blend=cccolor)
 
-        blended_w = img2 * (1 - t) + img1 * t
+		blended_w = img2 * (1 - t) + img1 * t
 
-    blended_w = PIL.Image.fromarray(blended_w.round().astype('uint8'))
-    return blended_w
+	blended_w = PIL.Image.fromarray(blended_w.round().astype('uint8'))
+	return blended_w
 
 
 def match_color(stylized_img, raw_img, blend=1.0):
-    img_arr_ref = cv2.cvtColor(np.array(stylized_img).round().astype('uint8'), cv2.COLOR_RGB2BGR)
-    img_arr_in = cv2.cvtColor(np.array(raw_img).round().astype('uint8'), cv2.COLOR_RGB2BGR)
-    # img_arr_in = cv2.resize(img_arr_in, (img_arr_ref.shape[1], img_arr_ref.shape[0]), interpolation=cv2.INTER_CUBIC )
-    img_arr_col = PT.pdf_transfer(img_arr_in=img_arr_in, img_arr_ref=img_arr_ref)
-    img_arr_reg = RG.regrain(img_arr_in=img_arr_col, img_arr_col=img_arr_ref)
+	img_arr_ref = cv2.cvtColor(np.array(stylized_img).round().astype('uint8'), cv2.COLOR_RGB2BGR)
+	img_arr_in = cv2.cvtColor(np.array(raw_img).round().astype('uint8'), cv2.COLOR_RGB2BGR)
+	# img_arr_in = cv2.resize(img_arr_in, (img_arr_ref.shape[1], img_arr_ref.shape[0]), interpolation=cv2.INTER_CUBIC )
+	img_arr_col = PT.pdf_transfer(img_arr_in=img_arr_in, img_arr_ref=img_arr_ref)
+	img_arr_reg = RG.regrain(img_arr_in=img_arr_col, img_arr_col=img_arr_ref)
 
-    blended = img_arr_reg * blend + img_arr_in * (1 - blend)
-    blended = cv2.cvtColor(blended.round().astype('uint8'), cv2.COLOR_BGR2RGB)
-    return blended
+	blended = img_arr_reg * blend + img_arr_in * (1 - blend)
+	blended = cv2.cvtColor(blended.round().astype('uint8'), cv2.COLOR_BGR2RGB)
+	return blended
 
 
 def match_color_var(stylized_img, raw_img, opacity=1., f=PT.pdf_transfer, regrain=False):
-    img_arr_ref = cv2.cvtColor(np.array(stylized_img).round().astype('uint8'), cv2.COLOR_RGB2BGR)
-    img_arr_in = cv2.cvtColor(np.array(raw_img).round().astype('uint8'), cv2.COLOR_RGB2BGR)
-    img_arr_ref = cv2.resize(img_arr_ref, (img_arr_in.shape[1], img_arr_in.shape[0]), interpolation=cv2.INTER_CUBIC)
-    img_arr_col = f(img_arr_in=img_arr_in, img_arr_ref=img_arr_ref)
-    if regrain: img_arr_col = RG.regrain(img_arr_in=img_arr_col, img_arr_col=img_arr_ref)
-    img_arr_col = img_arr_col * opacity + img_arr_in * (1 - opacity)
-    img_arr_reg = cv2.cvtColor(img_arr_col.round().astype('uint8'), cv2.COLOR_BGR2RGB)
+	img_arr_ref = cv2.cvtColor(np.array(stylized_img).round().astype('uint8'), cv2.COLOR_RGB2BGR)
+	img_arr_in = cv2.cvtColor(np.array(raw_img).round().astype('uint8'), cv2.COLOR_RGB2BGR)
+	img_arr_ref = cv2.resize(img_arr_ref, (img_arr_in.shape[1], img_arr_in.shape[0]), interpolation=cv2.INTER_CUBIC)
+	img_arr_col = f(img_arr_in=img_arr_in, img_arr_ref=img_arr_ref)
+	if regrain: img_arr_col = RG.regrain(img_arr_in=img_arr_col, img_arr_col=img_arr_ref)
+	img_arr_col = img_arr_col * opacity + img_arr_in * (1 - opacity)
+	img_arr_reg = cv2.cvtColor(img_arr_col.round().astype('uint8'), cv2.COLOR_BGR2RGB)
 
-    return img_arr_reg
+	return img_arr_reg
 
 
 def load_cc(path: Image.Image | Path | str, blur=2):
-    ccpil = PIL.Image.open(path)
-    multilayer_weights = np.array(ccpil) / 255
-    weights = np.ones_like(multilayer_weights[..., 0])
-    weights *= multilayer_weights[..., 0].clip(1 - missed_consistency_weight, 1)
-    weights *= multilayer_weights[..., 1].clip(1 - overshoot_consistency_weight, 1)
-    weights *= multilayer_weights[..., 2].clip(1 - edges_consistency_weight, 1)
+	ccpil = PIL.Image.open(path)
+	multilayer_weights = np.array(ccpil) / 255
+	weights = np.ones_like(multilayer_weights[..., 0])
+	weights *= multilayer_weights[..., 0].clip(1 - missed_consistency_weight, 1)
+	weights *= multilayer_weights[..., 1].clip(1 - overshoot_consistency_weight, 1)
+	weights *= multilayer_weights[..., 2].clip(1 - edges_consistency_weight, 1)
 
-    if blur > 0: weights = scipy.ndimage.gaussian_filter(weights, [blur, blur])
-    weights = np.repeat(weights[..., None], 3, axis=2)
+	if blur > 0: weights = scipy.ndimage.gaussian_filter(weights, [blur, blur])
+	weights = np.repeat(weights[..., None], 3, axis=2)
 
-    if DEBUG: print('weight min max mean std', weights.shape, weights.min(), weights.max(), weights.mean(), weights.std())
-    return weights
+	if DEBUG: print('weight min max mean std', weights.shape, weights.min(), weights.max(), weights.mean(), weights.std())
+	return weights
 
 
 def apply_mask(fg: Path | Image.Image, bg: Path | Image.Image, mask: Path | Image.Image, invert=False):
-    # Get the size we're working with
-    size = (1, 1)
-    if isinstance(fg, Image.Image): size = fg.size
-    if isinstance(bg, Image.Image): size = bg.size
-    if isinstance(mask, Image.Image): size = mask.size
+	# NOTE: this was used for applying background
+	# Get the size we're working with
+	size = (1, 1)
+	if isinstance(fg, Image.Image): size = fg.size
+	if isinstance(bg, Image.Image): size = bg.size
+	if isinstance(mask, Image.Image): size = mask.size
 
-    # Get the images
-    fg = load_pil(fg, size)
-    bg = load_pil(bg, size)
-    mask = load_pil(mask, size).convert('L')
-    if invert:
-        mask = PIL.ImageOps.invert(mask)
+	# Get the images
+	fg = load_pil(fg, size)
+	bg = load_pil(bg, size)
+	mask = load_pil(mask, size).convert('L')
+	if invert:
+		mask = PIL.ImageOps.invert(mask)
 
-    # Composite everything
-    bg.paste(fg, (0, 0), mask)
-    return bg
+	# Composite everything
+	bg.paste(fg, (0, 0), mask)
+	return bg
 
 
 # implemetation taken from https://github.com/lowfuel/progrockdiffusion
 
 
-def run_consistency(image, frame_num):
-    if mask_result and check_consistency and frame_num > 0:
-        diffuse_inpaint_mask_blur = 15
-        diffuse_inpaint_mask_thresh = 220
-        print('imitating inpaint')
-        frame1_path = f'{path_init_video_frames}/{frame_num:06}.jpg'
-        weights_path = f"{flo_fwd_folder}/{frame1_path.split('/')[-1]}-21_cc.jpg"
-        consistency_mask = load_cc(weights_path, blur=consistency_blur)
-        consistency_mask = cv2.GaussianBlur(consistency_mask,
-                                            (diffuse_inpaint_mask_blur, diffuse_inpaint_mask_blur), cv2.BORDER_DEFAULT)
-        consistency_mask = np.where(consistency_mask < diffuse_inpaint_mask_thresh / 255., 0, 1.)
-        consistency_mask = cv2.GaussianBlur(consistency_mask,
-                                            (3, 3), cv2.BORDER_DEFAULT)
-
-        # consistency_mask = torchvision.transforms.functional.resize(consistency_mask, image.size)
-        init_img_prev = PIL.Image.open(init_image)
-        print(init_img_prev.size, consistency_mask.shape, image.size)
-        cc_sz = consistency_mask.shape[1], consistency_mask.shape[0]
-        image_masked = np.array(image) * (1 - consistency_mask) + np.array(init_img_prev) * (consistency_mask)
-
-        # image_masked = np.array(image.resize(cc_sz, warp_interp))*(1-consistency_mask) + np.array(init_img_prev.resize(cc_sz, warp_interp))*(consistency_mask)
-        image_masked = PIL.Image.fromarray(image_masked.round().astype('uint8'))
-        # image = image_masked.resize(image.size, warp_interp)
-        image = image_masked
-    return image
-
-
-# @title Do the Run
-# @markdown Preview max size
-
-display_rate = 9999999
-n_batches = 1
-first_latent = None
-os.chdir(root_dir)
-
-resume_run = False  # @param{type: 'boolean'}
-run_to_resume = 'latest'  # @param{type: 'string'}
-resume_from_frame = 'latest'  # @param{type: 'string'}
-retain_overwritten_frames = False  # @param{type: 'boolean'}
+# def run_consistency(image, frame_num):
+# 	if mask_result and check_consistency and frame_num > 0:
+# 		diffuse_inpaint_mask_blur = 15
+# 		diffuse_inpaint_mask_thresh = 220
+# 		print('imitating inpaint')
+# 		frame1_path = f'{path_init_video_frames}/{frame_num:06}.jpg'
+# 		weights_path = f"{flo_fwd_folder}/{frame1_path.split('/')[-1]}-21_cc.jpg"
+# 		consistency_mask = load_cc(weights_path, blur=consistency_blur)
+# 		consistency_mask = cv2.GaussianBlur(consistency_mask,
+# 		                                    (diffuse_inpaint_mask_blur, diffuse_inpaint_mask_blur), cv2.BORDER_DEFAULT)
+# 		consistency_mask = np.where(consistency_mask < diffuse_inpaint_mask_thresh / 255., 0, 1.)
+# 		consistency_mask = cv2.GaussianBlur(consistency_mask,
+# 		                                    (3, 3), cv2.BORDER_DEFAULT)
+#
+# 		# consistency_mask = torchvision.transforms.functional.resize(consistency_mask, image.size)
+# 		init_img_prev = PIL.Image.open(init_image)
+# 		print(init_img_prev.size, consistency_mask.shape, image.size)
+# 		cc_sz = consistency_mask.shape[1], consistency_mask.shape[0]
+# 		image_masked = np.array(image) * (1 - consistency_mask) + np.array(init_img_prev) * (consistency_mask)
+#
+# 		# image_masked = np.array(image.resize(cc_sz, warp_interp))*(1-consistency_mask) + np.array(init_img_prev.resize(cc_sz, warp_interp))*(consistency_mask)
+# 		image_masked = PIL.Image.fromarray(image_masked.round().astype('uint8'))
+# 		# image = image_masked.resize(image.size, warp_interp)
+# 		image = image_masked
+# 	return image
 
 
-def do_run():
-    # if (args.animation_mode == 'Video Input') and (args.midas_weight > 0.0):
-    # midas_model, midas_transform, midas_net_w, midas_net_h, midas_resize_mode, midas_normalization = init_midas_depth_model(args.midas_depth_model)
+def chunk_list(lst, chunk_size):
+	return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
 
 
-    for i in range(args.n_batches):
-        # gc.collect()
-        # torch.cuda.empty_cache()
-        steps = get_scheduled_arg(frame_num, steps_schedule)
-        style_strength = get_scheduled_arg(frame_num, style_strength_schedule)
-        skip_steps = int(steps - steps * style_strength)
-        cur_t = diffusion.num_timesteps - skip_steps - 1
-        total_steps = cur_t
+# def do_run():
+# 	# if (args.animation_mode == 'Video Input') and (args.midas_weight > 0.0):
+# 	# midas_model, midas_transform, midas_net_w, midas_net_h, midas_resize_mode, midas_normalization = init_midas_depth_model(args.midas_depth_model)
+#
+# 	for i in range(args.n_batches):
+# 		# gc.collect()
+# 		# torch.cuda.empty_cache()
+# 		steps = get_scheduled_arg(frame_num, steps_schedule)
+# 		style_strength = get_scheduled_arg(frame_num, style_strength_schedule)
+# 		skip_steps = int(steps - steps * style_strength)
+# 		cur_t = diffusion.num_timesteps - skip_steps - 1
+# 		total_steps = cur_t
+#
+# 		consistency_mask = None
+# 		if check_consistency and frame_num > 0:
+# 			frame1_path = f'{path_init_video_frames}/{frame_num:06}.jpg'
+# 			if reverse_cc_order:
+# 				weights_path = f"{flo_fwd_folder}/{frame1_path.split('/')[-1]}-21_cc.jpg"
+# 			else:
+# 				weights_path = f"{flo_fwd_folder}/{frame1_path.split('/')[-1]}_12-21_cc.jpg"
+#
+# 			consistency_mask = load_cc(weights_path, blur=consistency_blur)
+#
+#
+# #         for k, image in enumerate(sample['pred_xstart']):
+# #             # tqdm.write(f'Batch {i}, step {j}, output {k}:')
+# #             current_time = datetime.now().strftime('%y%m%d-%H%M%S_%f')
+# #             percent = math.ceil(j/total_steps*100)
+# #             if args.n_batches > 0:
+# #               #if intermediates are saved to the subfolder, don't append a step or percentage to the name
+# #               if (cur_t == -1 or cur_t == stop_early-1) and args.intermediates_in_subfolder is True:
+# #                 save_num = f'{frame_num:06}' if animation_mode != "None" else i
+# #     filename = f'{args.batch_name}({args.batchNum})_{save_num}.png'
+# #   else:
+# #     #If we're working with percentages, append it
+# #     if args.steps_per_checkpoint is not None:
+# #       filename = f'{args.batch_name}({args.batchNum})_{i:06}-{percent:02}%.png'
+# #     # Or else, iIf we're working with specific steps, append those
+# #     else:
+# #       filename = f'{args.batch_name}({args.batchNum})_{i:06}-{j:03}.png'
+#
+# # image = TF.to_pil_image(image.add(1).div(2).clamp(0, 1))
+# # if frame_num > 0:
+# #   print('times per image', o); o+=1
+# #   image = PIL.Image.fromarray(match_color_var(first_frame, image, f=PT.lab_transfer))
+# #   # image.save(f'/content/{frame_num}_{cur_t}_{o}.jpg')
+# #   # image = PIL.Image.fromarray(match_color_var(first_frame, image))
+#
+# # #reapply init image on top of
+#
+# # if j % args.display_rate == 0 or cur_t == -1 or cur_t == stop_early-1:
+# #   image.save('progress.png')
+# #   display.clear_output(wait=True)
+# #   display.display(display.Image('progress.png'))
+# # if args.steps_per_checkpoint is not None:
+# #   if j % args.steps_per_checkpoint == 0 and j > 0:
+# #     if args.intermediates_in_subfolder is True:
+# #       image.save(f'{partialFolder}/{filename}')
+# #     else:
+# #       image.save(f'{sessionDir}/{filename}')
+# # else:
+# #   if j in args.intermediate_saves:
+# #     if args.intermediates_in_subfolder is True:
+# #       image.save(f'{partialFolder}/{filename}')
+# #     else:
+# #       image.save(f'{sessionDir}/{filename}')
+# # if (cur_t == -1) | (cur_t == stop_early-1):
+# #   if cur_t == stop_early-1: print('early stopping')
+# # if frame_num == 0:
+# #   save_settings()
+# # if args.animation_mode != "None":
+# #   # sys.exit(os.getcwd(), 'cwd')
+# #   image.save('prevFrame.png')
+# # image.save(f'{sessionDir}/{filename}')
+# # if args.animation_mode == 'Video Input':
+# #   # If turbo, save a blended image
+# #   if turbo_mode and frame_num > 0:
+# #     # Mix new image with prevFrameScaled
+# #     blend_factor = (1)/int(turbo_steps)
+# #     newFrame = cv2.imread('prevFrame.png') # This is already updated..
+# #     prev_frame_warped = cv2.imread('prevFrameScaled.png')
+# #     blendedImage = cv2.addWeighted(newFrame, blend_factor, prev_frame_warped, (1-blend_factor), 0.0)
+# #     cv2.imwrite(f'{sessionDir}/{filename}',blendedImage)
+# #   else:
+# #     image.save(f'{sessionDir}/{filename}')
+#
+# # if frame_num != args.max_frames-1:
+# #   display.clear_output()
+#
 
-        consistency_mask = None
-        if check_consistency and frame_num > 0:
-            frame1_path = f'{path_init_video_frames}/{frame_num:06}.jpg'
-            if reverse_cc_order:
-                weights_path = f"{flo_fwd_folder}/{frame1_path.split('/')[-1]}-21_cc.jpg"
-            else:
-                weights_path = f"{flo_fwd_folder}/{frame1_path.split('/')[-1]}_12-21_cc.jpg"
-
-            consistency_mask = load_cc(weights_path, blur=consistency_blur)
-
-        #         for k, image in enumerate(sample['pred_xstart']):
-        #             # tqdm.write(f'Batch {i}, step {j}, output {k}:')
-        #             current_time = datetime.now().strftime('%y%m%d-%H%M%S_%f')
-        #             percent = math.ceil(j/total_steps*100)
-        #             if args.n_batches > 0:
-        #               #if intermediates are saved to the subfolder, don't append a step or percentage to the name
-        #               if (cur_t == -1 or cur_t == stop_early-1) and args.intermediates_in_subfolder is True:
-        #                 save_num = f'{frame_num:06}' if animation_mode != "None" else i
-        #     filename = f'{args.batch_name}({args.batchNum})_{save_num}.png'
-        #   else:
-        #     #If we're working with percentages, append it
-        #     if args.steps_per_checkpoint is not None:
-        #       filename = f'{args.batch_name}({args.batchNum})_{i:06}-{percent:02}%.png'
-        #     # Or else, iIf we're working with specific steps, append those
-        #     else:
-        #       filename = f'{args.batch_name}({args.batchNum})_{i:06}-{j:03}.png'
-
-        # image = TF.to_pil_image(image.add(1).div(2).clamp(0, 1))
-        # if frame_num > 0:
-        #   print('times per image', o); o+=1
-        #   image = PIL.Image.fromarray(match_color_var(first_frame, image, f=PT.lab_transfer))
-        #   # image.save(f'/content/{frame_num}_{cur_t}_{o}.jpg')
-        #   # image = PIL.Image.fromarray(match_color_var(first_frame, image))
-
-        # #reapply init image on top of
-
-        # if j % args.display_rate == 0 or cur_t == -1 or cur_t == stop_early-1:
-        #   image.save('progress.png')
-        #   display.clear_output(wait=True)
-        #   display.display(display.Image('progress.png'))
-        # if args.steps_per_checkpoint is not None:
-        #   if j % args.steps_per_checkpoint == 0 and j > 0:
-        #     if args.intermediates_in_subfolder is True:
-        #       image.save(f'{partialFolder}/{filename}')
-        #     else:
-        #       image.save(f'{sessionDir}/{filename}')
-        # else:
-        #   if j in args.intermediate_saves:
-        #     if args.intermediates_in_subfolder is True:
-        #       image.save(f'{partialFolder}/{filename}')
-        #     else:
-        #       image.save(f'{sessionDir}/{filename}')
-        # if (cur_t == -1) | (cur_t == stop_early-1):
-        #   if cur_t == stop_early-1: print('early stopping')
-        # if frame_num == 0:
-        #   save_settings()
-        # if args.animation_mode != "None":
-        #   # sys.exit(os.getcwd(), 'cwd')
-        #   image.save('prevFrame.png')
-        # image.save(f'{sessionDir}/{filename}')
-        # if args.animation_mode == 'Video Input':
-        #   # If turbo, save a blended image
-        #   if turbo_mode and frame_num > 0:
-        #     # Mix new image with prevFrameScaled
-        #     blend_factor = (1)/int(turbo_steps)
-        #     newFrame = cv2.imread('prevFrame.png') # This is already updated..
-        #     prev_frame_warped = cv2.imread('prevFrameScaled.png')
-        #     blendedImage = cv2.addWeighted(newFrame, blend_factor, prev_frame_warped, (1-blend_factor), 0.0)
-        #     cv2.imwrite(f'{sessionDir}/{filename}',blendedImage)
-        #   else:
-        #     image.save(f'{sessionDir}/{filename}')
-
-        # if frame_num != args.max_frames-1:
-        #   display.clear_output()
-
-
-def fix_pillow_hack():
-    # @markdown If you are getting **"AttributeError: module 'PIL.TiffTags' has no attribute 'IFD'"** error,\
-    # @markdown just click **"Runtime" - "Restart and Run All"** once per session.
-    # hack to get pillow to work w\o restarting
-    # if you're running locally, just restart this runtime, no need to edit PIL files.
-    global file
-    if is_colab:
-        filedata = None
-        with open('/usr/local/lib/python3.7/dist-packages/PIL/TiffImagePlugin.py', 'r') as file:
-            filedata = file.read()
-        filedata = filedata.replace('(TiffTags.IFD, "L", "long"),', '#(TiffTags.IFD, "L", "long"),')
-        with open('/usr/local/lib/python3.7/dist-packages/PIL/TiffImagePlugin.py', 'w') as file:
-            file.write(filedata)
-            #             # Mix new image with prevFrameScaled
-            #             blend_factor = (1) / int(turbo_steps)
-            #             newFrame = cv2.imread('prevFrame.png')  # This is already updated..
-            #             prev_frame_warped = cv2.imread('prevFrameScaled.png')
-            #             blendedImage = cv2.addWeighted(newFrame, blend_factor, prev_frame_warped, (1 - blend_factor), 0.0)
-            #             cv2.imwrite(f'{sessionDir}/{filename}', blendedImage)
+def process_create(_init_frames):
+	global model, path
+	print("Creating process...")
+	model = init_gmflow()
+	path = _init_frames
+	print("Process created.")
 
 
-@plugjob
-def turbo():
-    ### Turbo mode - skip some diffusions, use 3d morph for clarity and to save time
-    # if turbo_mode:
-    #     if frame_num == turbo_preroll:  # start tracking oldframe
-    #         next_step_pil.save('oldFrameScaled.png')  # stash for later blending
-    #     elif frame_num > turbo_preroll:
-    #         # set up 2 warped image sequences, old & new, to blend toward new diff image
-    #         old_frame = do_3d_step('oldFrameScaled.png', frame_num, forward_clip=forward_weights_clip_turbo_step)
-    #         old_frame.save('oldFrameScaled.png')
-    #         if frame_num % int(turbo_steps) != 0:
-    #             print('turbo skip this frame: skipping clip diffusion steps')
-    #             filename = f'{args.batch_name}({args.batchNum})_{frame_num:06}.png'
-    #             blend_factor = ((frame_num % int(turbo_steps)) + 1) / int(turbo_steps)
-    #             print('turbo skip this frame: skipping clip diffusion steps and saving blended frame')
-    #             newWarpedImg = cv2.imread('prevFrameScaled.png')  # this is already updated..
-    #             oldWarpedImg = cv2.imread('oldFrameScaled.png')
-    #             blendedImage = cv2.addWeighted(newWarpedImg, blend_factor, oldWarpedImg, 1 - blend_factor, 0.0)
-    #             cv2.imwrite(f'{sessionDir}/{filename}', blendedImage)
-    #             next_step_pil.save(f'{img_filepath}')  # save it also as prev_frame to feed next iteration
-    #             if turbo_frame_skips_steps is not None:
-    #                 oldWarpedImg = cv2.imread('prevFrameScaled.png')
-    #                 cv2.imwrite(f'oldFrameScaled.png', oldWarpedImg)  # swap in for blending later
-    #                 print('clip/diff this frame - generate clip diff image')
-    #
-    #                 skip_steps = math.floor(steps * turbo_frame_skips_steps)
-    #             else: continue
-    #         else:
-    #             # if not a skip frame, will run diffusion and need to blend.
-    #             oldWarpedImg = cv2.imread('prevFrameScaled.png')
-    #             cv2.imwrite(f'oldFrameScaled.png', oldWarpedImg)  # swap in for blending later
-    #             print('clip/diff this frame - generate clip diff image')
+def process_pair(i, frame1, frame2, in_frame1, in_frame2):
+	global model, path
+
+	# print(f"{multiprocessing.current_process().name} Processing pair entry {i}: {in_frame1.stem} / {in_frame2.stem}...")
+
+	dir_flow_fwd, \
+		dir_flow_bwd, \
+		dir_flow_occ_fwd, \
+		dir_flow_occ_bwd = get_flow_paths(path)
+
+	out_flow_fwd = dir_flow_fwd / in_frame1.stem
+	out_flow_bwd = dir_flow_bwd / in_frame1.stem
+	out_occ_fwd = (dir_flow_occ_fwd / in_frame1.stem).with_suffix('.png')
+	out_occ_bwd = (dir_flow_occ_bwd / in_frame1.stem).with_suffix('.png')
+
+	if out_flow_fwd.with_suffix('.png').exists():
+		return
+
+	frame1 = load_cv2(in_frame1)
+	frame2 = load_cv2(in_frame2)
+
+	with torch.no_grad():
+		flow_fwd, flow_bwd, fwd_occ, bwd_occ = calc_flow(frame1, frame2, with_bidir, with_occlusion, model)
+
+	save_npy(out_flow_fwd.with_suffix('.npy'), flow_fwd)
+	im_flow_fwd = flow_to_image(flow_fwd)
+	save_png(im_flow_fwd, out_flow_fwd.with_suffix('.png'), True)
+
+	if with_bidir:
+		save_npy(out_flow_bwd.with_suffix('.npy'), flow_bwd)
+		im_flow_bwd = flow_to_image(flow_bwd)
+	# save_png(im_flow_bwd, out_flow_bwd.with_suffix('.png'), True)
+
+	if with_occlusion:
+		im_occ_bwd = Image.fromarray((bwd_occ[0].cpu().numpy() * 255.).astype(np.uint8))
+		im_occ_fwd = Image.fromarray((fwd_occ[0].cpu().numpy() * 255.).astype(np.uint8))
+		save_png(im_occ_fwd, out_occ_fwd, True)
+		save_png(im_occ_bwd, out_occ_bwd, True)
 
 
-    # Mix new image with prevFrameScaled
-    blend_factor = (1) / int(turbo_steps)
-    newFrame = cv2.imread('prevFrame.png')  # This is already updated..
-    prev_frame_warped = cv2.imread('prevFrameScaled.png')
-    blendedImage = cv2.addWeighted(newFrame, blend_factor, prev_frame_warped, (1 - blend_factor), 0.0)
-    cv2.imwrite(f'{sessionDir}/{filename}', blendedImage)
+def init_gmflow():
+	from plug_repos.opticalflow.gmflow.gmflow.gmflow import GMFlow
+
+	args = get_gmflow_args()
+	model = GMFlow(feature_channels=args.feature_channels,
+	               num_scales=args.num_scales,
+	               upsample_factor=args.upsample_factor,
+	               num_head=args.num_head,
+	               attention_type=args.attention_type,
+	               ffn_dim_expansion=args.ffn_dim_expansion,
+	               num_transformer_layers=args.num_transformer_layers,
+	               ).to(devices.device)
+
+	if args.resume:
+		print('Load checkpoint: %s' % args.resume)
+
+		loc = 'cuda:{}'.format(args.local_rank)
+		checkpoint = torch.load(args.resume, map_location=loc)
+
+		weights = checkpoint['model'] if 'model' in checkpoint else checkpoint
+
+		model.load_state_dict(weights, strict=args.strict_resume)
+
+	return model
+
+
+
+
+def calc_flow(frame1, frame2, bidir=None, occ=None, model=None):
+	flow, flow_bwd, fwd_occ, bwd_occ = None, None, None, None
+
+	from plug_repos.opticalflow.gmflow.gmflow.geometry import forward_backward_consistency_check
+	from plug_repos.opticalflow.gmflow.utils.utils import InputPadder
+
+	args = get_gmflow_args()
+	model.eval()
+
+	if occ:
+		assert bidir
+
+	if len(frame1.shape) == 2:  # gray image, for example, HD1K
+		frame1 = np.tile(frame1[..., None], (1, 1, 3))
+		frame2 = np.tile(frame2[..., None], (1, 1, 3))
+	else:
+		frame1 = frame1[..., :3]
+		frame2 = frame2[..., :3]
+
+	frame1 = torch.from_numpy(frame1).permute(2, 0, 1).float()
+	frame2 = torch.from_numpy(frame2).permute(2, 0, 1).float()
+
+	if args.inference_size is None:
+		padder = InputPadder(frame1.shape, padding_factor=args.padding_factor)
+		frame1, frame2 = padder.pad(frame1[None].cuda(), frame2[None].cuda())
+	else:
+		frame1, frame2 = frame1[None].cuda(), frame2[None].cuda()
+
+	# resize before inference
+	if args.inference_size is not None:
+		assert isinstance(args.inference_size, list) or isinstance(args.inference_size, tuple)
+		ori_size = frame1.shape[-2:]
+		frame1 = F.interpolate(frame1, size=args.inference_size, mode='bilinear', align_corners=True)
+		frame2 = F.interpolate(frame2, size=args.inference_size, mode='bilinear', align_corners=True)
+
+	results_dict = model(frame1, frame2,
+	                     attn_splits_list=args.attn_splits_list,
+	                     corr_radius_list=args.corr_radius_list,
+	                     prop_radius_list=args.prop_radius_list,
+	                     pred_bidir_flow=bidir,
+	                     )
+
+	flow_pr = results_dict['flow_preds'][-1]  # [B, 2, H, W]
+
+	# resize back
+	if args.inference_size is not None:
+		flow_pr = F.interpolate(flow_pr, size=ori_size, mode='bilinear', align_corners=True)
+		flow_pr[:, 0] = flow_pr[:, 0] * ori_size[-1] / args.inference_size[-1]
+		flow_pr[:, 1] = flow_pr[:, 1] * ori_size[-2] / args.inference_size[-2]
+
+	if args.inference_size is None:
+		flow = padder.unpad(flow_pr[0]).permute(1, 2, 0).cpu().numpy()  # [H, W, 2]
+	else:
+		flow = flow_pr[0].permute(1, 2, 0).cpu().numpy()  # [H, W, 2]
+
+	# also predict backward flow
+	if bidir:
+		assert flow_pr.size(0) == 2  # [2, H, W, 2]
+
+		if args.inference_size is None:
+			flow_bwd = padder.unpad(flow_pr[1]).permute(1, 2, 0).cpu().numpy()  # [H, W, 2]
+		else:
+			flow_bwd = flow_pr[1].permute(1, 2, 0).cpu().numpy()  # [H, W, 2]
+
+		# forward-backward consistency check
+		# occlusion is 1
+		if occ:
+			if args.inference_size is None:
+				fwd_flow = padder.unpad(flow_pr[0]).unsqueeze(0)  # [1, 2, H, W]
+				bwd_flow = padder.unpad(flow_pr[1]).unsqueeze(0)  # [1, 2, H, W]
+			else:
+				fwd_flow = flow_pr[0].unsqueeze(0)
+				bwd_flow = flow_pr[1].unsqueeze(0)
+
+			fwd_occ, bwd_occ = forward_backward_consistency_check(fwd_flow, bwd_flow)  # [1, H, W] float
+
+	return flow, flow_bwd, fwd_occ, bwd_occ
+
+
+def get_gmflow_args():
+	parser = argparse.ArgumentParser()
+	# dataset
+	parser.add_argument('--checkpoint_dir', default='tmp', type=str,
+	                    help='where to save the training log and models')
+	parser.add_argument('--stage', default='chairs', type=str,
+	                    help='training stage')
+	parser.add_argument('--image_size', default=[384, 512], type=int, nargs='+',
+	                    help='image size for training')
+	parser.add_argument('--padding_factor', default=16, type=int,
+	                    help='the input should be divisible by padding_factor, otherwise do padding')
+	parser.add_argument('--max_flow', default=400, type=int,
+	                    help='exclude very large motions during training')
+	parser.add_argument('--val_dataset', default=['chairs'], type=str, nargs='+',
+	                    help='validation dataset')
+	parser.add_argument('--with_speed_metric', action='store_true',
+	                    help='with speed metric when evaluation')
+	# training
+	parser.add_argument('--lr', default=4e-4, type=float)
+	parser.add_argument('--batch_size', default=12, type=int)
+	parser.add_argument('--num_workers', default=4, type=int)
+	parser.add_argument('--weight_decay', default=1e-4, type=float)
+	parser.add_argument('--grad_clip', default=1.0, type=float)
+	parser.add_argument('--num_steps', default=100000, type=int)
+	parser.add_argument('--seed', default=326, type=int)
+	parser.add_argument('--summary_freq', default=100, type=int)
+	parser.add_argument('--val_freq', default=10000, type=int)
+	parser.add_argument('--save_ckpt_freq', default=10000, type=int)
+	parser.add_argument('--save_latest_ckpt_freq', default=1000, type=int)
+	# resume pretrained model or resume training
+	parser.add_argument('--resume', default=None, type=str,
+	                    help='resume from pretrain model for finetuing or resume from terminated training')
+	parser.add_argument('--strict_resume', action='store_true')
+	parser.add_argument('--no_resume_optimizer', action='store_true')
+	# GMFlow model
+	parser.add_argument('--num_scales', default=1, type=int,
+	                    help='basic gmflow model uses a single 1/8 feature, the refinement uses 1/4 feature')
+	parser.add_argument('--feature_channels', default=128, type=int)
+	parser.add_argument('--upsample_factor', default=8, type=int)
+	parser.add_argument('--num_transformer_layers', default=6, type=int)
+	parser.add_argument('--num_head', default=1, type=int)
+	parser.add_argument('--attention_type', default='swin', type=str)
+	parser.add_argument('--ffn_dim_expansion', default=4, type=int)
+	parser.add_argument('--attn_splits_list', default=[2], type=int, nargs='+',
+	                    help='number of splits in attention')
+	parser.add_argument('--corr_radius_list', default=[-1], type=int, nargs='+',
+	                    help='correlation radius for matching, -1 indicates global matching')
+	parser.add_argument('--prop_radius_list', default=[-1], type=int, nargs='+',
+	                    help='self-attention radius for flow propagation, -1 indicates global attention')
+	# loss
+	parser.add_argument('--gamma', default=0.9, type=float, help='loss weight')
+	# evaluation
+	parser.add_argument('--eval', action='store_true')
+	parser.add_argument('--save_eval_to_file', action='store_true')
+	parser.add_argument('--evaluate_matched_unmatched', action='store_true')
+	# inference on a directory
+	parser.add_argument('--inference_dir', default=None, type=str)
+	parser.add_argument('--inference_size', default=None, type=int, nargs='+', help='can specify the inference size')
+	parser.add_argument('--dir_paired_data', action='store_true', help='Paired data in a dir instead of a sequence')
+	parser.add_argument('--save_flo_flow', action='store_true')
+	# predict on sintel and kitti test set for submission
+	parser.add_argument('--submission', action='store_true',
+	                    help='submission to sintel or kitti test sets')
+	parser.add_argument('--output_path', default='output', type=str,
+	                    help='where to save the prediction results')
+	parser.add_argument('--save_vis_flow', action='store_true',
+	                    help='visualize flow prediction as .png image')
+	parser.add_argument('--no_save_flo', action='store_true',
+	                    help='not save flow as .flo')
+	# distributed training
+	parser.add_argument('--local_rank', default=0, type=int)
+	parser.add_argument('--distributed', action='store_true')
+	parser.add_argument('--launcher', default='none', type=str, choices=['none', 'pytorch'])
+	parser.add_argument('--gpu_ids', default=0, type=int, nargs='+')
+	parser.add_argument('--count_time', action='store_true',
+	                    help='measure the inference time on sintel')
+
+	from src import plugins
+	args = parser.parse_args(shlex.split(
+		# "--padding_factor 32 "
+		# "--upsample_factor 4 "
+		# "--num_scales 2 "
+		# "--attn_splits_list 4 16 "
+		# "--corr_radius_list -1 16 "
+		# "--prop_radius_list -1 16 "
+		f"--resume {plugins.get('opticalflow').res('gmflow_sintel-0c07dcb3.pth').as_posix()}"))
+	return args

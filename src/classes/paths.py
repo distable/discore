@@ -2,7 +2,11 @@ import math
 import os
 import re
 import shutil
+from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
+
+from src.lib.printlib import printerr
 
 root = Path(__file__).resolve().parent.parent.parent  # TODO this isn't very robust
 
@@ -16,7 +20,6 @@ scripts_name = 'scripts'
 sessions_name = 'sessions'
 tmp_name = 'tmp'
 
-
 code_core = root / src_name  # Code for the core
 code_plugins = root / src_plugins_name  # Downloaded plugin source code
 plugins = root / 'src_plugins'  # Contains the user's downloaded plugins (cloned from github)
@@ -25,8 +28,11 @@ plug_logs = root / 'plug-logs'  # Contains the logs output by each plugin, categ
 plug_repos = root / plug_repos_name  # Contains the repositories cloned by each plugin, categorized by plugin id
 scripts = root / 'scripts'  # User project scripts to run
 tmp = root / tmp_name  # Temporary files
+hobo_icon = root / src_name / 'gui' / 'icon.png'
 
+# Special files
 gui_font = code_core / 'gui' / 'vt323.ttf'
+openai_api_key = root / '.openai_api_key'
 
 # Image outputs are divied up into 'sessions'
 # Session logic can be customized in different ways:
@@ -34,6 +40,11 @@ gui_font = code_core / 'gui' / 'vt323.ttf'
 #   - Global session on a timeout
 #   - Started manually by the user
 sessions = root / sessions_name
+
+init_paths = [
+    sessions,
+    sessions / '.inits'
+]
 
 session_timestamp_format = '%Y-%m-%d_%Hh%M'
 
@@ -45,22 +56,69 @@ sessions.mkdir(exist_ok=True)
 # These suffixes will be stripped from the plugin IDs for simplicity
 plugin_suffixes = ['_plugin']
 
-video_exts = ['.mp4', '.mov', '.avi', '.mkv']
+video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
 image_exts = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif']
 audio_exts = ['.wav', '.mp3', '.ogg', '.flac', '.aac']
 text_exts = ['.py', '.txt', '.md', '.json', '.xml', '.html', '.css', '.js', '.csv', '.tsv', '.yml', '.yaml', '.ini']
 
-audio_ext = '.ogg'
-audio_codec = 'libopus'
+audio_ext = '.flac'
+audio_codec = 'flac'
 leadnum_zpad = 8
 
 
 # sys.path.insert(0, root.as_posix())
 def is_image(file):
+    file = Path(file)
     return file.suffix in image_exts
 
 def is_video(file):
+    file = Path(file)
     return file.suffix in video_exts
+
+def is_audio(file):
+    file = Path(file)
+    return file.suffix in audio_exts
+
+def is_youtube(url):
+    url = str(url)
+    return 'youtube.com' in url or 'youtu.be' in url
+
+def is_timestamp_range(string):
+    # Match a timestamp range such as 00:33-00:45
+    return re.match(r'^\d{1,2}:\d{2}-\d{1,2}:\d{2}$', string) is not None
+
+def get_timestamp_range(string):
+    # Match a timestamp range such as 00:33-00:45 and return min/max seconds (two values)
+    if is_timestamp_range(string):
+        lo, hi = string.split('-')
+        lo = parse_time_to_seconds(lo)
+        hi = parse_time_to_seconds(hi)
+        return lo, hi
+    else:
+        raise ValueError(f"Invalid timestamp range: {string}")
+
+def parse_time_to_seconds(time_str):
+    def try_parse(fmt):
+        try:
+            return datetime.strptime(time_str, fmt)
+        except ValueError:
+            return None
+
+    # Parse time string to datetime object
+    time_obj = try_parse('%H:%M:%S.%f') or \
+               try_parse('%H:%M:%S') or \
+               try_parse('%M:%S.%f') or \
+               try_parse('%M:%S') or \
+               try_parse('%S.%f') or \
+               try_parse('%S')
+
+    # Convert datetime object to timedelta object
+    time_delta = timedelta(hours=time_obj.hour,
+                           minutes=time_obj.minute,
+                           seconds=time_obj.second,
+                           microseconds=time_obj.microsecond)
+    # Return total seconds
+    return time_delta.total_seconds()
 
 def short_pid(pid):
     """
@@ -142,21 +200,19 @@ def get_leadnum_zpad(path=None):
     biggest = 0
     smallest = math.inf
 
-
     for file in Path(path).iterdir():
         if file.suffix in image_exts:
             match = re.match(r"^(\d+)\.", file.name)
             if match is not None:
                 num = match.group(1)
                 size = len(num)
-                print(size, smallest, biggest, file)
+                # print(size, smallest, biggest, file)
                 biggest = max(biggest, size)
                 smallest = min(smallest, size)
 
     if smallest != biggest:
         return smallest
     return biggest
-
 
 def is_leadnum_zpadded(path=None):
     return get_leadnum_zpad(path) >= 2
@@ -296,10 +352,39 @@ def get_script_paths():
         if 'libs' not in root:
             for file in files:
                 file = Path(file)
-                if file.endswith(".py") and not file.startswith("__"):
+                if str(file).endswith(".py") and not str(file).startswith("__"):
                     yield os.path.join(root, file)
 
 # endregion
+
+def guess_suffix(suffixless_path):
+    # Convert the input to a Path object
+    path = Path(suffixless_path)
+
+    if path.suffix != "":
+        return path
+
+    # Check if the suffixless path already exists
+    if path.exists():
+        return path
+
+    # Get the directory and stem from the suffixless path
+    directory = path.parent
+    stem = path.stem
+
+    # Iterate over the files in the directory
+    for file_path in directory.iterdir():
+        file_stem = file_path.stem
+
+        # Check if the file has the same stem as the suffixless path
+        if file_stem == stem:
+            return file_path
+
+    # No matching file found, return None
+    # printerr(f"Couldn't guess extension: {suffixless_path}")
+    return path
+
+
 def rmtree(path):
     """
     Remove a directory and all its contents
@@ -322,6 +407,8 @@ def remap(dst, fn):
 
 def mktree(path):
     path = Path(path)
+    if path.suffix:
+        path = path.parent
     path.mkdir(parents=True, exist_ok=True)
 
 def rmclean(path):
@@ -379,6 +466,13 @@ def cp(path1, path2):
 def exists(dat):
     return Path(dat).exists()
 
+def is_valid_url(url):
+    try:
+        result = urlparse(url)
+        return all([result.scheme, result.netloc])
+    except ValueError:
+        return False
+
 def iter_scripts():
     # Iterate with os.walk
     for parent, dirs, files in os.walk(scripts):
@@ -405,3 +499,25 @@ def iter_scripts():
 #             shlexrun(f'ffmpeg -i {mp3path} -acodec pcm_s16le -ac 2 -ar 44100 -b:v 224k {session.res("music.wav")}')
 #             mp3path.unlink()
 #             path = session.res('music.wav')
+
+def get_first_exist(*paths):
+    for p in paths:
+        if p and p.exists():
+            return p
+
+    return paths[-1]
+def unhide(flowdir):
+    flowdir = Path(flowdir)
+    if flowdir.name.startswith('.'):
+        flowdir = flowdir.with_name(flowdir.name[1:])
+    return flowdir
+
+def hide(flowdir):
+    flowdir = Path(flowdir)
+    if not flowdir.name.startswith('.'):
+        flowdir = flowdir.with_name(f'.{flowdir.name}')
+    return flowdir
+
+def seconds_to_ffmpeg_timecode(param):
+    # Convert absolute seconds (e.g. 342) to ffmpeg timecode (e.g. 00:05:35.00) string
+    return str(timedelta(seconds=param))

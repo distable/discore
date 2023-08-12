@@ -1,9 +1,9 @@
 from PyQt6 import QtGui
 from PyQt6.QtWidgets import QWidget
 
-class ImageWidget(QWidget):
+class SurfaceWidget(QWidget):
     def __init__(self, surf, parent=None):
-        super(ImageWidget, self).__init__(parent)
+        super(SurfaceWidget, self).__init__(parent)
         self.surface = surf
         self.image = None
         self.update_image()

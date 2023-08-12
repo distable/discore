@@ -3,14 +3,18 @@
 
 import random
 import sys
+import time
 from math import *
 
 import numpy as np
+import torch
 from numpy import ndarray
 from numpy.lib.stride_tricks import sliding_window_view
 from opensimplex import OpenSimplex
+from scipy.signal import find_peaks
 
 from src import renderer
+from src.lib.printlib import trace_decorator
 
 # import pytti
 simplex = OpenSimplex(random.randint(-999999, 9999999))
@@ -18,6 +22,8 @@ math_env = {}
 
 f = 0
 rv = renderer.rv
+
+epsilon = 0.0001
 
 
 def prepare_math_env(*args):
@@ -39,37 +45,37 @@ def update_math_env(k, v):
 
 SEED_MAX = 2 ** 32 - 1
 
-cached_simplex = {}
-counters = {}
+counters = dict(perlin01=0)
 
-def set_counters():
-    counters.clear()
+perlin_cache = []
+max_perlin_cache = 10
+enable_perlin_cache = False
 
+def reset():
+    for k in counters.keys():
+        counters[k] = 0
+
+    perlin_cache.clear()
 
 def set_seed(seed=None, with_torch=True):
-    # if seed is None:
-    #     seed = int(time.time())
-    # elif isinstance(seed, str):
-    #     seed = str_to_seed(seed)
-    #
-    # seed = seed % SEED_MAX
-    # seed = int(seed)
-    #
-    # global simplex
-    # global current_seed
-    #
-    # current_seed = seed
-    # if seed in cached_simplex:
-    #     simplex = cached_simplex[seed]
-    # else:
-    #     simplex = OpenSimplex(seed)
-    #     cached_simplex[seed] = simplex
-    #
-    # random.seed(seed)
-    # np.random.seed(seed)
-    #
-    # if with_torch:
-    #     torch.manual_seed(seed)
+    if seed is None:
+        seed = int(time.time())
+    elif isinstance(seed, str):
+        seed = str_to_seed(seed)
+
+    seed = seed % SEED_MAX
+    seed = int(seed)
+
+    global simplex
+    global current_seed
+
+    current_seed = seed
+
+    random.seed(seed)
+    np.random.seed(seed)
+
+    if with_torch:
+        torch.manual_seed(seed)
     pass
 
 
@@ -111,11 +117,20 @@ def choose_or(l: list, default, p=None):
         return ret
 
 
-def choose(l: list, p=None):
-    ret = random.choices(l, p)
+def choose(l: list, w=None, exclude=None):
+    if exclude is not None:
+        if w is None:
+            w = [1] * len(l)
+        w[exclude] = 0
+
+    ret = random.choices(l, weights=w)
     if isinstance(ret, list):
         return ret[0]
     return ret
+
+def choices(l: list, n=1, p=None):
+    # Choose n items from l
+    return random.choices(l, k=n, weights=p)
 
 
 def choose_or(l: list, default, p=None):
@@ -133,7 +148,6 @@ def choose_or(l: list, default, p=None):
 def wchoose(l: list, weights):
     return random.choices(l, weights)
 
-
 def rng(min=None, max=None):
     if not min and not max:
         return random.random()
@@ -141,7 +155,6 @@ def rng(min=None, max=None):
         return random.uniform(0, max)
     else:
         return random.uniform(min, max)
-
 
 def rngi(min=None, max=None):
     if not min and not max:
@@ -166,6 +179,20 @@ def val_or_range(v, max=None):
         return float(v)
     else:
         raise ValueError(f"maths.val_or_range: Bad argument={v}, type={type(v)}")
+
+
+@trace_decorator
+def get_rand_sum(n, lo, hi):
+    ret = []
+    i = 0
+    while not lo < sum(ret) < hi:
+        ret = [rng(lo / n, hi / n) for _ in range(n)]
+        i += 1
+        if i > 100:
+            print(f"Couldn't find a valid sum for get_rand_sum after {i} tries (n={n}, lo={lo}, hi={hi}, sum={sum(ret)}, ret={ret}, lo/n={lo / n}, hi/n={hi / n})")
+            break
+
+    return tuple(ret)
 
 
 def smooth_damp(current, target, current_velocity, smooth_time, max_speed, delta_time):
@@ -206,9 +233,7 @@ def slerp(a, b, t, k=0.3):
 
 def ilerp(lo, hi, v):
     ret = clamp01((v - lo) / (hi - lo))
-    if isnan(ret):
-        return 0
-    return ret
+    return np.nan_to_num(ret)
 
 
 def remap(v, a, b, x, y):
@@ -233,17 +258,23 @@ def sin(t):
 def cos(t):
     return np.cos(t * tau)
 
-def sin01(a=1, p=1, w=1, size=None):
+def sin01(p=1, w=1, size=None):
     if size is None:
         size = rv.n
     t = np.linspace(0, tau * size / rv.fps / p, size)
-    return (0.5 + 0.5 * np.sin(t)) ** w * a
+    return (0.5 + 0.5 * np.sin(t)) ** w
 
-def cos01(a=1, p=1, w=1, size=None):
+def sin11(p=1, w=1, size=None):
+    return sin01(p, w, size) * 2 - 1
+
+def cos11(p=1, w=1, size=None):
+    return cos01(p, w, size) * 2 - 1
+
+def cos01(p=1, w=1, size=None):
     if size is None:
         size = rv.n
     t = np.linspace(0, tau * size / rv.fps / p, size)
-    return (0.5 + 0.5 * np.cos(t)) ** w * a
+    return (0.5 + 0.5 * np.cos(t)) ** w
 
 def swave(t):
     return 1
@@ -268,6 +299,32 @@ def sin1(t, a=1, p=1, o=0):
 def cos1(t, a=1, p=1, o=0):
     return (cos((t / p) - o) * .5 + .5) * a
 
+def range1(start, finish):
+    """
+    Return ones from start to finish
+    """
+    ret = np.zeros(rv.n)
+
+    if isinstance(start, str):
+        from src.classes import paths
+        start_s = paths.parse_time_to_seconds(start)
+        start = int(start_s * rv.fps)
+
+    if isinstance(finish, str):
+        from src.classes import paths
+        finish_s = paths.parse_time_to_seconds(finish)
+        finish = int(finish_s * rv.fps)
+
+    ret[start:finish] = 1
+    return ret
+
+def range0(start, finish):
+    """
+    Return zeros from star to finish
+    """
+    ret = np.ones(rv.n)
+    ret[start:finish] = 0
+    return ret
 
 def tsigmoid(x, k=0.3, norm_window=None):
     lo, hi, span = 0, 0, 0
@@ -302,25 +359,48 @@ def srcurve(v, a=0.3, b=0.3, norm=None):
 def jrcurve(v, a=0.3, b=0.3, norm=None):
     return jcurve(rcurve(v, a, norm), b)
 
+def nprng(lo=0, hi=1) -> ndarray:
+    return np.random.uniform(lo, hi, rv.n)
+
+def rng01(lo=0, hi=1) -> ndarray:
+    return np.random.uniform(lo, hi, rv.n)
+
+def rng11(lo=-1, hi=1) -> ndarray:
+    return np.random.uniform(lo, hi, rv.n)
+
 def perlin01(freq=1.0, lo=0, hi=1) -> ndarray:
-    t = np01(rv.n)
-    nperlin = (perlin(t, freq) + 1) * 0.5
-    if 'perlin01' not in counters:
-        counters['perlin01'] = 0
     counters['perlin01'] += 1
-    t += counters['perlin01']
-    return nperlin * (hi - lo) + lo
+
+    if enable_perlin_cache and len(perlin_cache) > max_perlin_cache:
+        return perlin_cache[counters['perlin01'] % len(perlin_cache)]
+
+    t = np01(rv.n)
+    t *= freq * 100
+    t += counters['perlin01'] * 333.33
+    nperlin = simplex.noise2array(t, np.zeros(1))[0]
+    nperlin = (nperlin + 1) * 0.5
+    nperlin = nperlin * (hi - lo) + lo
+
+    if enable_perlin_cache:
+        perlin_cache.append(nperlin)
+
+    return nperlin
+
+
+@trace_decorator
+def perlin11(freq=1.0, lo=-1, hi=1) -> ndarray:
+    return perlin01(freq, lo, hi)
 
 def perlin(t, freq=1.0) -> ndarray | float:
     if isinstance(t, ndarray):
-        return npperlin(t.shape[0], freq)
+        return npperlin(t, freq)
     else:
         return simplex.noise2(t * freq, 0)
 
 def max(a, b):
     return np.maximum(a, b)
 
-def schedule(schedule, size=None) -> ndarray:
+def schedule(*schedule, size=None) -> ndarray:
     if size is None:
         size = rv.n
     return np.resize(schedule, size)
@@ -339,17 +419,23 @@ def npperlin(count, freq=1.0, off=0) -> ndarray:
     if isinstance(count, ndarray):
         count = count.shape[0]
 
-    ret = np.zeros(count)
-    for i in range(count):
-        ret[i] = perlin(i + off, freq)
+    ret = simplex.noise2array(np.arange(count) * freq + off, np.zeros(1))[0]
+    # ret = np.zeros(count)
+    # for i in range(count):
+    #     ret[i] = perlin(i + off, freq)
+
     return ret
 
 
 def npperlin_like(ar, freq=1, off=0) -> ndarray:
     return npperlin(ar.shape[0], freq, off)
 
-def nprng(lo=0, hi=1) -> ndarray:
-    return np.random.uniform(lo, hi, rv.n)
+# def noisemix(*ndarrays):
+#     # Mix between ndarrays using perlin noise (spread out evenly across 0-1)
+#     noise = perlin01()
+#     ret = np.zeros(rv.n)
+#     for i in range(len(ndarrays)):
+#         ret += ndarrays[i] * (noise > i / len(ndarrays))
 
 def iszero(arr):
     if arr is None:
@@ -466,6 +552,8 @@ def symnorm(x, window=None):
 
 
 def norm(x, window=None, symmetric=False):
+    if window:
+        window *= rv.fps
     x, lo, hi = exnorm(x, window, symmetric)
     return x
 
@@ -489,8 +577,8 @@ def exnorm(x, window=None, symmetric=False):
         lo = -b
         hi = b
 
-    ret = (x - lo) / (hi - lo), lo, hi
-    return np.nan_to_num(ret)
+    x_ret = (x - lo) / (hi - lo)
+    return np.nan_to_num(x_ret), lo, hi
 
 
 def stretch(array: np.ndarray, new_len: int) -> np.ndarray:
@@ -524,13 +612,35 @@ def convolve(arr, n_iter=20, kernel=None, mask=None):
     arr = norm(arr)
     arr = arr * (hi - lo) + lo
 
-    return lerp(original, arr, mask)
+    ret = lerp(original, arr, mask)
+    ret = np.nan_to_num(ret)
+    return ret
 
 def blur(arr, n_iter=20, mask=None):
     return convolve(arr, n_iter=n_iter, kernel=[1.0, 1.0, 1.0], mask=mask)
 
 def sharpen(arr, n_iter=20, mask=None):
     return convolve(arr, n_iter=n_iter, kernel=[-1.0, 2.0, -1.0], mask=mask)
+
+def get_peaks(s_chapter, prominence=0.01):
+    peak_indices = find_peaks(s_chapter, prominence=prominence)[0]
+    peaks = np.zeros_like(s_chapter)
+    peaks[peak_indices] = 1
+    return peaks
+
+def get_valleys(s_chapter, prominence=0.01):
+    valley_indices = find_peaks(-s_chapter, prominence=prominence)[0]
+    valleys = np.zeros_like(s_chapter)
+    valleys[valley_indices] = 1
+    return valleys
+
+def get_prominence(s_chapter, prominence=0.01):
+    peak_indices = find_peaks(s_chapter, prominence=prominence)[0]
+    valley_indices = find_peaks(-s_chapter, prominence=prominence)[0]
+    prominence = np.zeros_like(s_chapter)
+    prominence[peak_indices] = 1
+    prominence[valley_indices] = -1
+    return prominence
 
 def smooth_1euro(x, min_cutoff=0.004, beta=0.7):
     end = x.shape[0]
@@ -551,7 +661,6 @@ def smoothing_factor(t_e, cutoff):
     r = 2 * np.pi * cutoff * t_e
     return r / (r + 1)
 
-
 def exponential_smoothing(a, x, x_prev):
     return a * x + (1 - a) * x_prev
 
@@ -566,6 +675,35 @@ def thresh(v, t=0.5, s=1):
 
 def rebase(v, t=0.5, s=1):
     return norm(clamp01(v * s - t))
+
+def arr_slerp(v1, v2, t, DOT_THRESHOLD=0.9995):
+    """
+    Spherical interpolation between two arrays v1 v2
+    """
+    inputs_are_torch = False
+    if not isinstance(v1, np.ndarray):
+        inputs_are_torch = True
+        input_device = v1.device
+        v1 = v1.cpu().numpy()
+        v2 = v2.cpu().numpy()
+
+    dot = np.sum(v1 * v2 / (np.linalg.norm(v1) * np.linalg.norm(v2)))
+    if np.abs(dot) > DOT_THRESHOLD:
+        v2 = (1 - t) * v1 + t * v2
+    else:
+        theta_0 = np.arccos(dot)
+        sin_theta_0 = np.sin(theta_0)
+        theta_t = theta_0 * t
+        sin_theta_t = np.sin(theta_t)
+        s0 = np.sin(theta_0 - theta_t) / sin_theta_0
+        s1 = sin_theta_t / sin_theta_0
+        v2 = s0 * v1 + s1 * v2
+
+    if inputs_are_torch:
+        import torch
+        v2 = torch.from_numpy(v2).to(input_device)
+
+    return v2
 
 class OneEuroFilter:
     def __init__(self, t0, x0, dx0=0.0, min_cutoff=1.0, beta=0.0,
@@ -601,7 +739,23 @@ class OneEuroFilter:
 
         return x_hat
 
+class TimeRect:
+    def __init__(self):
+        pass
+
+    def cutup(self, binary_arr):
+        pass
+
+    def lowpass_extract(self, binary_arr):
+        pass
+
 
 # pytti.parametric_eval = parametric_eval
 
 set_seed()
+
+# Aliases & shortcuts
+jc = jcurve
+rc = rcurve
+sr = srcurve
+jr = jrcurve

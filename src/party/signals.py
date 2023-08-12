@@ -169,6 +169,16 @@ def load_vr(path, beta=0.5, min_cutoff=0.004, one_euro=True):
             d2 = resampy.resample(d2, rec.samples_per_second, rv.fps)
             d3 = resampy.resample(d3, rec.samples_per_second, rv.fps)
 
+            # max size rv.n
+            if d1.shape[0] > rv.n:
+                d1 = d1[:rv.n]
+                d2 = d2[:rv.n]
+                d3 = d3[:rv.n]
+            elif d1.shape[0] < rv.n:
+                d1 = np.pad(d1, (0, rv.n - d1.shape[0]))
+                d2 = np.pad(d2, (0, rv.n - d2.shape[0]))
+                d3 = np.pad(d3, (0, rv.n - d3.shape[0]))
+
             if one_euro:
                 d1 = smooth_1euro(d1, min_cutoff, beta=beta)
                 d2 = smooth_1euro(d2, min_cutoff, beta=beta)
@@ -178,7 +188,7 @@ def load_vr(path, beta=0.5, min_cutoff=0.004, one_euro=True):
             vrinput = VRInput(nodeid, modality, d1, d2, d3)
 
             # if nodeid in ['HeadRot', 'LRot', 'RRot']:
-            #     fix_vr_angles(vrinput)
+            # fix_vr_angles(vrinput)
 
             rec.inputs.append(vrinput)
             rec.nodes[nodeid] = vrinput

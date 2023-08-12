@@ -1,178 +1,208 @@
 import math
 
+import cv2
 import numpy as np
+import torch
 from einops import rearrange
 from PIL import ImageOps
 
 from src.classes.convert import load_cv2, pil2cv
+from src.lib.printlib import trace_decorator
 from src.party import tricks
 
 from src.classes.Plugin import Plugin
 from src.lib import devices
 from src.plugins import plugfun, plugfun_img
+from src.rendering.hud import hud
+from src_plugins.midas3d import py3d_tools
 
 TRANSLATION_SCALE = 1.0 / 200.0
 
 
 class Midas3DPlugin(Plugin):
-    def title(self):
-        return "midas3d"
+	def title(self):
+		return "midas3d"
 
-    def describe(self):
-        return ""
+	def describe(self):
+		return ""
 
-    def load(self):
-        self.loaded = True
+	def load(self):
+		self.loaded = True
 
-        print("Loading midas ...")
-        from .depth import DepthModel
-        self.model = DepthModel(devices.device)
-        self.model.download_midas(self.res())
-        self.model.download_adabins(self.res())
+		print("Loading midas ...")
+		from .depth import DepthModel
+		self.model = DepthModel(devices.device)
+		self.model.download_midas(self.res())
+		self.model.download_adabins(self.res())
 
-        self.model.load_midas(self.res())
-        self.model.load_adabins(self.res())
+		self.model.load_midas(self.res())
+		self.model.load_adabins(self.res())
 
-    def transform_image_3d(self, prev_img_cv2, depth_tensor, rot_mat, translate, near, far, fov, padding_mode, sampling_mode):
-        if not self.loaded:
-            self.load()
+	def transform_image_3d(self, prev_img_cv2, depth_tensor, rot_mat, translate, near, far, fov, padding_mode, sampling_mode):
+		if not self.loaded:
+			self.load()
 
-        import torch
-        from . import py3d_tools as p3d
+		import torch
 
-        # device = devices.device
-        device = devices.cpu
-        w, h = prev_img_cv2.shape[1], prev_img_cv2.shape[0]
+		# device = devices.device
+		device = devices.cpu
+		w, h = prev_img_cv2.shape[1], prev_img_cv2.shape[0]
 
-        aspect_ratio = float(w) / float(h)
-        persp_cam_old = p3d.FoVPerspectiveCameras(near, far, aspect_ratio, fov=fov, degrees=True, device=device)
-        persp_cam_new = p3d.FoVPerspectiveCameras(near, far, aspect_ratio, fov=fov, degrees=True, R=rot_mat, T=torch.tensor([translate]), device=device)
+		aspect_ratio = float(w) / float(h)
+		persp_cam_old = py3d_tools.FoVPerspectiveCameras(near, far, aspect_ratio, fov=fov, degrees=True, device=device)
+		persp_cam_new = py3d_tools.FoVPerspectiveCameras(near, far, aspect_ratio, fov=fov, degrees=True, R=rot_mat, T=torch.tensor([translate]), device=device)
 
-        # range of [-1,1] is important to torch grid_sample's padding handling
-        y, x = torch.meshgrid(torch.linspace(-1., 1., h, dtype=torch.float32, device=device), torch.linspace(-1., 1., w, dtype=torch.float32, device=device))
-        z = torch.as_tensor(depth_tensor, dtype=torch.float32, device=device)
-        xyz_old_world = torch.stack((x.flatten(), y.flatten(), z.flatten()), dim=1)
+		# range of [-1,1] is important to torch grid_sample's padding handling
+		y, x = torch.meshgrid(torch.linspace(-1., 1., h, dtype=torch.float32, device=device), torch.linspace(-1., 1., w, dtype=torch.float32, device=device))
+		z = torch.as_tensor(depth_tensor, dtype=torch.float32, device=device)
+		xyz_old_world = torch.stack((x.flatten(), y.flatten(), z.flatten()), dim=1)
 
-        xyz_old_cam_xy = persp_cam_old.get_full_projection_transform().transform_points(xyz_old_world)[:, 0:2]
-        xyz_new_cam_xy = persp_cam_new.get_full_projection_transform().transform_points(xyz_old_world)[:, 0:2]
+		xyz_old_cam_xy = persp_cam_old.get_full_projection_transform().transform_points(xyz_old_world)[:, 0:2]
+		xyz_new_cam_xy = persp_cam_new.get_full_projection_transform().transform_points(xyz_old_world)[:, 0:2]
 
-        offset_xy = xyz_new_cam_xy - xyz_old_cam_xy
-        # affine_grid theta param expects a batch of 2D mats. Each is 2x3 to do rotation+translation.
-        identity_2d_batch = torch.tensor([[1., 0., 0.], [0., 1., 0.]], device=device).unsqueeze(0)
-        # coords_2d will have shape (N,H,W,2).. which is also what grid_sample needs.
-        coords_2d = torch.nn.functional.affine_grid(identity_2d_batch, [1, 1, h, w], align_corners=False)
-        offset_coords_2d = coords_2d - torch.reshape(offset_xy, (h, w, 2)).unsqueeze(0)
+		offset_xy = xyz_new_cam_xy - xyz_old_cam_xy
+		# affine_grid theta param expects a batch of 2D mats. Each is 2x3 to do rotation+translation.
+		identity_2d_batch = torch.tensor([[1., 0., 0.], [0., 1., 0.]], device=device).unsqueeze(0)
+		# coords_2d will have shape (N,H,W,2).. which is also what grid_sample needs.
+		coords_2d = torch.nn.functional.affine_grid(identity_2d_batch, [1, 1, h, w], align_corners=False)
+		offset_coords_2d = coords_2d - torch.reshape(offset_xy, (h, w, 2)).unsqueeze(0)
 
-        image_tensor = rearrange(torch.from_numpy(prev_img_cv2.astype(np.float32)), 'h w c -> c h w').to(device)
-        new_image = torch.nn.functional.grid_sample(
-                image_tensor.add(1 / 512 - 0.0001).unsqueeze(0),
-                offset_coords_2d,
-                mode=sampling_mode,
-                padding_mode=padding_mode,
-                align_corners=False
-        )
+		image_tensor = rearrange(torch.from_numpy(prev_img_cv2.astype(np.float32)), 'h w c -> c h w').to(device)
+		new_image = torch.nn.functional.grid_sample(
+			image_tensor.add(1 / 512 - 0.0001).unsqueeze(0),
+			offset_coords_2d,
+			mode=sampling_mode,
+			padding_mode=padding_mode,
+			align_corners=False
+		)
 
-        # convert back to cv2 style numpy array
-        result = rearrange(
-                new_image.squeeze().clamp(0, 255),
-                'c h w -> h w c'
-        ).cpu().numpy().astype(prev_img_cv2.dtype)
-        return result
+		# convert back to cv2 style numpy array
+		result = rearrange(
+			new_image.squeeze().clamp(0, 255),
+			'c h w -> h w c'
+		).cpu().numpy().astype(prev_img_cv2.dtype)
+		return result
 
-    def transform_3d(self,
-                     imcv,
-                     x, y, z,
-                     rx, ry, rz,
-                     fov, near, far,
-                     padding_mode, sampling_mode,
-                     w_midas,
-                     depth=None):
-        import torch
-        imcv = load_cv2(imcv)
+	def transform_3d(self,
+	                 imcv,
+	                 x, y, z,
+	                 rx, ry, rz,
+	                 fov, near, far,
+	                 padding_mode, sampling_mode,
+	                 w_midas,
+	                 depth=None):
+		import torch
+		imcv = load_cv2(imcv)
 
-        x = x
-        y = y
-        z = z
-        rx = rx
-        ry = ry
-        rz = rz
-        fov = fov
-        near = near
-        far = far
-        w_midas = w_midas
-        # vprint(f'transform_3d(translate=({x:.2f}, {y:.2f}, {z:.2f}) rotation=({rx:.2f}, {ry:.2f}, {rz:.2f}) fov={fov:.2f} near={near:.2f} far={far:.2f} w_midas={w_midas:.2f}')
+		x = x
+		y = y
+		z = z
+		rx = rx
+		ry = ry
+		rz = rz
+		fov = fov
+		near = near
+		far = far
+		w_midas = w_midas
+		# vprint(f'transform_3d(translate=({x:.2f}, {y:.2f}, {z:.2f}) rotation=({rx:.2f}, {ry:.2f}, {rz:.2f}) fov={fov:.2f} near={near:.2f} far={far:.2f} w_midas={w_midas:.2f}')
 
-        if depth is None:
-            depth = self.model.predict(imcv, w_midas)
+		if depth is None or isinstance(depth, int) and depth == 0:
+			depth = self.model.predict(imcv, w_midas)
 
-        translate_xyz = [-x * TRANSLATION_SCALE, y * TRANSLATION_SCALE, -z * TRANSLATION_SCALE]
-        rotate_xyz = [math.radians(rx), math.radians(ry), math.radians(rz)]
+		translate_xyz = [-x * TRANSLATION_SCALE, y * TRANSLATION_SCALE, -z * TRANSLATION_SCALE]
+		rotate_xyz = [math.radians(rx), math.radians(ry), math.radians(rz)]
 
-        rot_mat = p3d.euler_angles_to_matrix(torch.tensor(rotate_xyz, device=devices.device), "XYZ").unsqueeze(0)
-        result = self.transform_image_3d(imcv, depth, rot_mat, translate_xyz, near, far, fov, padding_mode, sampling_mode)
-        torch.cuda.empty_cache()
+		rot_mat = py3d_tools.euler_angles_to_matrix(torch.tensor(rotate_xyz, device=devices.device), "XYZ").unsqueeze(0)
+		result = self.transform_image_3d(imcv, depth, rot_mat, translate_xyz, near, far, fov, padding_mode, sampling_mode)
+		torch.cuda.empty_cache()
 
-        return result
+		return result
 
-    def mat3d_dev(self, *kargs, **kwargs):
-        if 'z' in kwargs:
-            kwargs['z'] *= TRANSLATION_SCALE
-        return tricks.mat2d(*kargs, **kwargs)
+	def mat3d_dev(self, *kargs, **kwargs):
+		if 'x' in kwargs: kwargs['x'] *= TRANSLATION_SCALE * 50
+		if 'y' in kwargs: kwargs['y'] *= TRANSLATION_SCALE * 50
+		if 'z' in kwargs: kwargs['z'] *= TRANSLATION_SCALE
+		if 'rz' in kwargs: kwargs['r'] = kwargs.pop('rz')
 
-    @plugfun(mat3d_dev)
-    def mat3d(self,
-              x: float = 0,
-              y: float = 0,
-              z: float = 0,
-              rx: float = 0,
-              ry: float = 0,
-              rz: float = 0,
-              fov: float = 90,
-              near: float = 200,
-              far: float = 10000,
-              w_midas: float = 0.3,
-              padding_mode: str = 'border',
-              sampling_mode: str = 'bicubic',
-              depth=None,
-              flat: bool = False,
-              **kwargs):
-        from src import renderer
-        import torch
-        rv = renderer.rv
+		return tricks.mat2d(*kargs, **kwargs)
 
-        if rv.img is None:
-            return
+	@plugfun(mat3d_dev)
+	@trace_decorator
+	def mat3d(self,
+	          image=None,
+	          x: float = 0,
+	          y: float = 0,
+	          z: float = 0,
+	          rx: float = 0,
+	          ry: float = 0,
+	          rz: float = 0,
+	          fov: float = 90,
+	          near: float = 200,
+	          far: float = 10000,
+	          w_midas: float = 0.3,
+	          padding_mode: str = 'border',
+	          sampling_mode: str = 'bicubic',
+	          depth=None,
+	          flat: bool = False,
+	          **kwargs):
+		from src import renderer
+		import torch
+		rv = renderer.rv
 
-        pil = rv.img
+		img = rv.img
+		if image is not None:
+			img = image
+		if img is None:
+			return
 
-        if flat:
-            torch.ones((pil.width, pil.height), device=devices.device)
+		if flat:
+			torch.ones((img.width, img.height), device=devices.device)
+		if isinstance(depth, np.ndarray) and len(depth.shape) == 3:
+			depth = bgr_depth_to_tensor(depth)
 
-        if not self.loaded:
-            self.load()
+		if not self.loaded:
+			self.load()
 
-        return self.transform_3d(rv.img,
-                                 x, y, z,
-                                 rx, ry, rz,
-                                 fov, near, far,
-                                 padding_mode, sampling_mode,
-                                 w_midas, depth)
+		hud(x=x, y=y, z=z, rx=rx, ry=ry, rz=rz, fov=fov, near=near, far=far, w=w_midas, pm=padding_mode, sm=sampling_mode)
 
-    @plugfun(default_return=(plugfun_img, plugfun_img))
-    def get_depth(self, img, w_midas: float = 0.3, **kwargs):
-        if not self.loaded:
-            self.load()
+		return self.transform_3d(img,
+		                         x, y, z,
+		                         rx, ry, rz,
+		                         fov, near, far,
+		                         padding_mode, sampling_mode,
+		                         w_midas, depth)
 
-        from src import renderer
-        session = renderer.session
+	@plugfun(default_return=(plugfun_img, plugfun_img))
+	def get_depth(self, img, w_midas: float = 0.3, **kwargs):
+		if not self.loaded:
+			self.load()
 
-        if img is None:
-            img = session.img
+		from src import renderer
+		session = renderer.session
 
-        depth_tensor = self.model.predict(np.asarray(img), w_midas)
-        pil = self.model.to_pil(depth_tensor)
+		if img is None:
+			img = session.img
 
-        # The pil out of the model is inverted (far is white)
-        pil = ImageOps.invert(pil)
+		depth_tensor = self.model.predict(np.asarray(img), w_midas)
+		pil = self.model.to_pil(depth_tensor)
 
-        return pil2cv(pil), depth_tensor
+		# The pil out of the model is inverted (far is white)
+		pil = ImageOps.invert(pil)
+
+		return pil2cv(pil), depth_tensor
+
+
+def bgr_depth_to_tensor(bgr_depth_map):
+	# Step 1: Convert to grayscale
+	grayscale_depth_map = cv2.cvtColor(bgr_depth_map, cv2.COLOR_BGR2GRAY)
+
+	# Step 2: Normalize to [0, 1]
+	normalized_depth_map = grayscale_depth_map / 255.0
+
+	# Step 3: Scale to [1, 3]
+	scaled_depth_map = (normalized_depth_map * 2) + 1
+
+	# Step 4: Convert to PyTorch tensor
+	depth_tensor = torch.tensor(scaled_depth_map, dtype=torch.float32)
+
+	return depth_tensor

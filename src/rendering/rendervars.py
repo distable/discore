@@ -3,20 +3,22 @@ import numpy as np
 import jargs
 import userconf
 from numpy import ndarray
-from dataclasses import dataclass
+# from dataclasses import dataclass
 from math import sqrt
 from src.classes import convert
-from src.classes.convert import cv2pil
+from src.classes.convert import cv2pil, pil2cv
+from src.lib.printlib import trace_decorator
 
 # These are values that cannot be used as signal names
 # Because they are either special or cannot change during rendering
 protected_names = [
+    'img',
     'session', 'signals',
     'w', 'h', 'w2', 'h2',
     't', 'f', 'dt', 'ref', 'tr', 'len',
-    'n', 'scalar', 'draft' ]
+    'n', 'scalar', 'draft']
 
-@dataclass
+# @dataclass
 class RenderVars:
     """
     Render variables supported by the renderer
@@ -25,7 +27,7 @@ class RenderVars:
 
     def __init__(self):
         self.is_array_mode = False
-        self.n = 1000
+        self.n = 0
         self.prompt = ""
         self.promptneg = ""
         self.nprompt = None
@@ -61,31 +63,12 @@ class RenderVars:
         self.draft = 1
         self.dry = False
         self.signals = {}
+        self.signal_sets = {}
+        self.current_signal_set = None
+        self.img = None
+        self.init_img = None
         self.init()
         self.trace = "__init__"
-
-    def __getattr__(self, key):
-        if key not in self.__dict__:
-            if self.__dict__['is_array_mode']:
-                self.__dict__[key] = 0
-            else:
-                return 0
-        return self.__dict__[key]
-        # self.__dict__[key] = 0
-
-    def __setattr__(self, key, value):
-        if self.__dict__.get('is_array_mode', False) and \
-                isinstance(value, (float, int)) and \
-                not isinstance(value, bool) and \
-                key not in protected_names:
-            value = np.ones(self.n) * value
-
-        if isinstance(value, ndarray) and len(value.shape) == 1:
-            self.save_signals(**{key: value})
-            self.__dict__[key] = value
-        else:
-            self.__dict__[key] = value
-
 
     @property
     def speed(self):
@@ -104,6 +87,17 @@ class RenderVars:
     def duration(self):
         return self.n / self.fps
 
+    @property
+    def size(self):
+        return self.w, self.h
+
+    def zeros(self) -> ndarray:
+        return np.zeros(self.n)
+
+    def ones(self, v=1.0) -> ndarray:
+        return np.ones(self.n) * v
+
+
     def init(self):
         def zero() -> ndarray:
             return np.zeros(self.n)
@@ -114,23 +108,23 @@ class RenderVars:
         for s in self.signals.items():
             self.signals[s[0]] = zero()
 
-        x, y, z = zero(), zero(), zero()
-        r, rx, ry, rz = zero(), zero(), zero(), zero()
-        d, chg, cfg, seed, sampler = one(), one(), one(16.5), zero(), 'euler-a'
-        nguide, nsp = zero(), zero()
-        smear = zero()
-        hue, sat, val = zero(), zero(), zero()
-        brightness, saturation, contrast = zero(), zero(), zero()
-        ripple_period, ripple_amplitude, ripple_speed = zero(), zero(), zero()
-        smear = zero()
-        seed_atten_ccg1, seed_atten_ccg2, seed_atten_ccg3 = zero(), zero(), zero()
-        seed_atten_time = one()
+        # x, y, z = zero(), zero(), zero()
+        # r, rx, ry, rz = zero(), zero(), zero(), zero()
+        # d, chg, cfg, seed, sampler = one(), one(), one(16.5), zero(), 'euler-a'
+        # nguide, nsp = zero(), zero()
+        # smear = zero()
+        # hue, sat, val = zero(), zero(), zero()
+        # brightness, saturation, contrast = zero(), zero(), zero()
+        # ripple_period, ripple_amplitude, ripple_speed = zero(), zero(), zero()
+        # smear = zero()
+        # seed_atten_ccg1, seed_atten_ccg2, seed_atten_ccg3 = zero(), zero(), zero()
+        # seed_atten_time = one()
 
         # Apply these changes
         dic = dict(locals())
         dic.pop('self')
         self.save_signals(**dic)
-        self.load_signals()
+        self.load_signal_arrays()
 
         self.w = userconf.default_width
         self.h = userconf.default_height
@@ -153,6 +147,7 @@ class RenderVars:
         # Resize all signals (paddding with zeros)
         for s in self.signals.items():
             self.signals[s[0]] = np.pad(s[1], (0, self.n - len(s[1])))
+        self.load_signal_arrays()
 
     def set_n(self, n):
         self.n = n
@@ -160,12 +155,36 @@ class RenderVars:
         # Resize all signals (paddding with zeros)
         for s in self.signals.items():
             self.signals[s[0]] = np.pad(s[1], (0, self.n - len(s[1])))
+        self.load_signal_arrays()
 
-    def set_size(self, w, h, *, frac=64, remote=(768, 512), resize=True, crop=False):
+    def resize(self, crop=False):
+        if self.img is None:
+            return
+
+        if crop:
+            # center anchored crop
+            im = cv2pil(self.img)
+            im = im.crop((self.w // 2 - self.w // 2, self.h // 2 - self.h // 2, self.w // 2 + self.w // 2, self.h // 2 + self.h // 2))
+            self.img = pil2cv(im)
+        else:
+            im = cv2pil(self.img)
+            im = im.resize((self.w, self.h))
+            self.img = pil2cv(im)
+
+
+    def set_size(self, w=None, h=None, *, frac=64, remote=None, resize=True, crop=False):
+        # 1920x1080
+        # 1280x720
+        # 1024x576
+        # 768x512
+        # 640x360
+
+        w = w or self.w
+        h = h or self.h
+
         draft = 1
         draft += jargs.args.draft
 
-        jargs.args.remote = True
         if jargs.args.remote and remote:
             w, h = remote
 
@@ -174,14 +193,8 @@ class RenderVars:
         self.w = self.w // frac * frac
         self.h = self.h // frac * frac
 
-        # image resize (pillow)
-        if resize and self.session.img.shape[0] != self.h and self.session.img.shape[1] != self.w:
-            impil = cv2pil(self.session.img)
-            impil = impil.resize((self.w, self.h))
-            self.session.img = impil
-        if crop:
-            # center anchored crop
-            self.session.img = self.session.img.crop((self.w // 2 - self.w // 2, self.h // 2 - self.h // 2, self.w // 2 + self.w // 2, self.h // 2 + self.h // 2))
+        if resize:
+            self.resize(crop)
 
     def start_frame(self, f, scalar=1):
         rv = self
@@ -189,7 +202,6 @@ class RenderVars:
         if rv.w is None: rv.w = rv.ses.width
         if rv.h is None: rv.h = rv.ses.height
 
-        rv.img = rv.session.img
         rv.dry = False
         rv.nextseed = random.randint(0, 2 ** 32 - 1)
         rv.f = int(f)
@@ -200,10 +212,16 @@ class RenderVars:
         rv.ref = 1 / 12 * rv.fps
         rv.tr = rv.t * rv.ref
 
-        rv.load_values()
+        rv.load_signal_values()
         rv.scalar = scalar
+        rv.img = rv.session.img
         if rv.img is None:
             rv.img = np.zeros((rv.h, rv.w, 3), dtype=np.uint8)
+        if rv.img.shape[0] != rv.h or rv.img.shape[1] != rv.w:
+            impil = cv2pil(rv.img)
+            impil = impil.resize((rv.w, rv.h))
+            rv.img = pil2cv(impil)
+        rv.img_f = rv.img
 
     def get_constants(self):
         from src.party.maths import np0, np01
@@ -212,6 +230,19 @@ class RenderVars:
         indices = np0(self.n - 1, self.n)
 
         return n, t, indices
+
+    def reset_signals(self):
+        # Set all signals to zero
+        for k, v in self.signals.items():
+            self.signals[k] = np.zeros(self.n)
+
+        self.load_signal_arrays()
+        self.signals.clear()
+        self.signal_sets.clear()
+        self.current_signal_set = None
+
+    def has_signal(self, name):
+        return name in self.signals
 
     def save_signals(self, **kwargs):
         if len(kwargs) == 0:
@@ -227,31 +258,32 @@ class RenderVars:
                     music=self.music, drum=self.drum, bass=self.bass, piano=self.piano, vocal=self.vocal, voice=self.voice
             )
 
-        for name, v in kwargs.items():
-            self.__dict__[name] = v
-            if isinstance(v, ndarray):
+        for name, signal in kwargs.items():
+            self.__dict__[name] = signal
+            if isinstance(signal, ndarray):
                 if name in protected_names:
                     print(f"set_frame_signals: {name} is protected and cannot be set as a signal. Skipping...")
                     continue
 
-                if self.n > v.shape[0]:
+                if self.n > signal.shape[0]:
                     print(f"set_frame_signals: {name} signal is too short. Padding with last value...")
-                    v = np.pad(v, (0, self.n - v.shape[0]), 'edge')
-                elif self.n < v.shape[0]:
-                    print(f"set_frame_signals: {name} signal is longer than n, extending RenderVars.n to {v.shape[0]}...")
-                    self.set_n(v.shape[0])
+                    signal = np.pad(signal, (0, self.n - signal.shape[0]), 'edge')
+                elif self.n < signal.shape[0]:
+                    print(f"set_frame_signals: {name} signal is longer than n, extending RenderVars.n to {signal.shape[0]}...")
+                    self.set_n(signal.shape[0])
 
                 # print(f"SET {name} {v}")
-                self.signals[name] = v
-                self.__dict__[f'{name}s'] = v
+                self.signals[name] = signal
+                self.__dict__[name] = signal
+                self.__dict__[f'{name}s'] = signal
 
         # TODO update len
-        self.n = self.n
-        for name, v in self.signals.items():
-            self.n = max(self.n, v.shape[0])
+        # self.n = self.n
+        # for name, v in self.signals.items():
+        #     self.n = max(self.n, v.shape[0])
 
 
-    def load_values(self):
+    def load_signal_values(self):
         dic = self.__dict__.copy()
         for name, value in dic.items():
             # if isinstance(value, ndarray):
@@ -273,10 +305,104 @@ class RenderVars:
                     print(f'rv.set_frame_signals(IndexError): {name} {self.f} {len(signal)}')
 
     # Same function as above but sets the whole signal
-    def load_signals(self):
+    def load_signal_arrays(self):
         for name, value in self.signals.items():
             self.__dict__[name] = value
             self.__dict__[f'{name}s'] = value
+
+    def set_signal_set(self, name):
+        if self.current_signal_set is None:
+            # We haven't started using signal sets yet, so just set the name for now
+            # We will save the set later when we switch to a new set, or finish the render callback
+            self.current_signal_set = name
+        else:
+            # We are already using signal sets, so save the current set to the set dictionary
+            self.signal_sets[self.current_signal_set] = dict(self.signals)
+            self.signals.clear()
+            self.current_signal_set = name
+
+            # Ok now we can load the new set
+            self.signals.clear()
+            if name in self.signal_sets:
+                # Already exists, load that shit
+                self.signals = self.signal_sets[name]
+            else:
+                # Get them in sync
+                self.signal_sets[name] = self.signals
+                pass
+
+    def copy_set_frame(self, src_name, dst_name, i):
+        dst, is_current, src = self.get_set_src_dst(dst_name, src_name)
+
+        for k, v in src.items():
+            if not k in dst:
+                from src.party.maths import zero
+                dst[k] = zero()
+            dst[k][i] = src[k][i]
+
+        if is_current:
+            self.load_signal_arrays()
+
+    @trace_decorator
+    def copy_set_frames(self, src_name, dst_name, i_start, i_end):
+        dst, is_current, src = self.get_set_src_dst(dst_name, src_name)
+
+        for k, v in src.items():
+            if not k in dst:
+                from src.party.maths import zero
+                dst[k] = zero()
+            dst[k][i_start:i_end] = src[k][i_start:i_end]
+
+        if is_current:
+            self.load_signal_arrays()
+
+    def get_set_src_dst(self, dst_name, src_name):
+        if src_name == self.current_signal_set: src = self.signals
+        else: src = self.signal_sets[src_name]
+        is_current = dst_name is None or dst_name == self.current_signal_set
+        if is_current: dst = self.signals
+        elif dst_name not in self.signal_sets:
+            self.signal_sets[dst_name] = dict()
+            dst = dst = self.signal_sets[dst_name]
+        else: dst = self.signal_sets[dst_name]
+        return dst, is_current, src
+
+    def copy_set(self, src_name, dst_name=None):
+        dst, is_current, src = self.get_set_src_dst(dst_name, src_name)
+
+        for k, v in src.items():
+            dst[k] = src[k].copy()
+
+        if is_current:
+            self.load_signal_arrays()
+
+
+    def __getattr__(self, key):
+        if key not in self.__dict__:
+            if not self.__dict__['is_array_mode']:
+                print(f"RenderVars: Assigning 0 to {key}")
+                self.__dict__[key] = 0
+            else:
+                print(f"RenderVars: Assigning [0] to {key}")
+                self.__dict__[key] = np.zeros(self.n)
+        return self.__dict__[key]
+        # self.__dict__[key] = 0
+
+    def __setattr__(self, key, value):
+        self.set_signal(key, value)
+
+    def set_signal(self, key, value):
+        if self.__dict__.get('is_array_mode', False) and \
+                isinstance(value, (float, int)) and \
+                not isinstance(value, bool) and \
+                key not in protected_names:
+            value = np.ones(self.n) * value
+        if isinstance(value, ndarray) and len(value.shape) == 1:
+            # self.__dict__[key] = value
+            self.save_signals(**{key: value})
+        else:
+            self.__dict__[key] = value
+
 
     def load_cv2(self, img):
         return convert.load_cv2(img if img is not None else self.session.img)
@@ -286,3 +412,28 @@ class RenderVars:
 
     def load_pilarr(self, img):
         return convert.load_pilarr(img if img is not None else self.session.img)
+
+    def get_timestamp_string(self, signal_name):
+        import datetime
+        ret = '''
+chapters = PTiming("""
+'''
+        indices = np.where(self.signals[signal_name] > 0.5)[0]
+        for v in indices:
+            from src.gui.ryusig import to_seconds
+            time_s = to_seconds(v)
+            delta = datetime.timedelta(seconds=time_s)
+            s = str(delta)
+            if '.' not in s:
+                s += '.000000'
+
+            ret += s + "\n"
+
+        ret += '"""'
+        return ret
+
+    def to_seconds(self, frame):
+        return np.clip(frame, 0, self.n - 1) / self.fps
+
+    def to_frame(self, t):
+        return int(np.clip(t * self.fps, 0, self.n - 1))

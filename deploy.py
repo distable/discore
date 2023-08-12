@@ -1,3 +1,8 @@
+"""
+Note: in this context src always refer to local machine, dst always refer to remote machine
+"""
+
+
 import os
 import subprocess
 import sys
@@ -8,6 +13,8 @@ from paramiko.ssh_exception import NoValidConnectionsError, SSHException
 from yachalk import chalk
 
 import jargs
+from src.classes.common import setup_ctrl_c
+from src.lib.corelib import shlexrun
 from src.lib.printlib import print_cmd
 from jargs import args, argv
 from src.classes import paths
@@ -17,27 +24,45 @@ import userconf
 import json
 import threading
 
+disk_space = '32'
+docker_image = 'pytorch/pytorch'
+
 # logging.basicConfig()
 # logging.getLogger("paramiko").setLevel(logging.WARNING) # for example
 
 ssh = None
 
+apt_packages = [
+    'python3-venv',
+    'libgl1',
+    'zip',
+    'ffmpeg',
+    'gcc'
+]
+
 # User files/directories to copy at the start of a deployment
-deploy_rsync = [('requirements-vastai.txt', 'requirements.txt'),
-                'discore.py',
-                'deploy.py',
-                'jargs.py',
-                paths.userconf_name,
-                paths.scripts_name,
-                paths.src_name,
-                paths.src_plugins_name,
-                # paths.plug_repos_name
-                ]
+deploy_upload_paths = [('requirements-vastai.txt', 'requirements.txt'),
+                       'discore.py',
+                       'deploy.py',
+                       'jargs.py',
+                       paths.userconf_name,
+                       paths.scripts_name,
+                       paths.src_plugins_name,
+                       paths.src_name,
+                       # paths.plug_repos_name
+                       ]
+deploy_upload_paths_sftp = [paths.plug_res_name]
+deploy_upload_paths_sftp = []
 
-deploy_put = [paths.plug_res_name]
-deploy_put = []
+deploy_upload_blacklist_paths = [
+    "video.mp4",
+    "video__*.mp4",
+    "*.jpg",
+    "__pycache__"
+    # "*.npy",
+]
 
-excludes_rsync_download = [
+rsync_job_download_exclusion = [
     "video.mp4",
     "video__*.mp4",
     "script.py",
@@ -45,12 +70,9 @@ excludes_rsync_download = [
     "__pycache__/*"
 ]
 
-excludes_rsync_upload = [
-    "video.mp4",
-    "video__*.mp4",
-    "*.jpg",
-    "__pycache__"
-    # "*.npy",
+rsync_job_upload_paths = [
+    paths.scripts,
+    paths.code_core / 'party',
 ]
 
 vastai_python_bin = '/opt/conda/bin/python3'
@@ -59,7 +81,7 @@ vastai_python_bin = '/opt/conda/bin/python3'
 # Commands to run in order to setup a deployment
 def get_deploy_commands(clonepath):
     return [
-        ['git', 'clone', '--recursive', 'https://github.com/distable/obo', clonepath],
+        ['git', 'clone', '--recursive', 'https://github.com/distable/discore', clonepath],
         ['git', '-C', clonepath, 'submodule', 'update', '--init', '--recursive'],
     ]
 
@@ -80,7 +102,7 @@ def deploy_local():
     for cmd in cmds:
         subprocess.run(cmd)
 
-    for file in deploy_rsync:
+    for file in deploy_upload_paths:
         if isinstance(file, tuple):
             shutil.copyfile(src / file[0], dst / file[1])
         if isinstance(file, str):
@@ -108,6 +130,8 @@ def deploy_vastai():
 
     session = jargs.get_discore_session()
 
+    is_fresh_install = False
+
     # 1. List the available machines with vastai api
     # 2. Prompt the user to choose one
     # 3. Connect to it with SSH
@@ -127,7 +151,7 @@ def deploy_vastai():
 
     def fetch_offers():
         import userconf
-        out = subprocess.check_output(['python3', vastpath.as_posix(), 'search', 'offers', args.vastai_search or userconf.vastai_default_search]).decode('utf-8')
+        out = subprocess.check_output(['python3', vastpath.as_posix(), 'search', 'offers', f"{args.vastai_search or userconf.vastai_default_search} disk_space>{disk_space} verified=true"]).decode('utf-8')
         # Example output:
         # ID       CUDA  Num  Model     PCIE  vCPUs    RAM  Disk   $/hr    DLP    DLP/$  NV Driver   Net_up  Net_down  R     Max_Days  mach_id  verification
         # 5563966  11.8  14x  RTX_3090  12.7  64.0   257.7  1672   5.8520  341.8  58.4   520.56.06   23.1    605.7     99.5  22.4      6294     verified
@@ -189,6 +213,9 @@ def deploy_vastai():
         print_instance(e)
     print("")
 
+    if args.vastai_list:
+        return
+
     # 1. Choose or create instance
     # ----------------------------------------
     if len(instances) >= 1:
@@ -231,7 +258,7 @@ def deploy_vastai():
         # Create the machine
         # Example command: ./vast create instance 36842 --image vastai/tensorflow --disk 32
         selected_id = offers[choice - 1]['id']
-        out = subprocess.check_output(['python3', vastpath.as_posix(), 'create', 'instance', selected_id, '--image', 'pytorch/pytorch', '--disk', '32']).decode('utf-8')
+        out = subprocess.check_output(['python3', vastpath.as_posix(), 'create', 'instance', selected_id, '--image', docker_image, '--disk', disk_space]).decode('utf-8')
         if 'Started.' not in out:
             print("Failed to create instance:")
             print(out)
@@ -248,6 +275,8 @@ def deploy_vastai():
             return
 
         selected_id = new_instances[0]['id']
+        is_fresh_install = True
+
         print(f"Successfully created instance {selected_id}!")
 
     def wait_for_instance(id):
@@ -272,6 +301,17 @@ def deploy_vastai():
 
         time.sleep(3)
 
+    if args.vastai_delete:
+        print(f"Deleting Vast.ai instance {selected_id} in 5 seconds ...")
+        time.sleep(5)
+        subprocess.check_output(['python3', vastpath.as_posix(), 'destroy instance', str(selected_id)]).decode('utf-8')
+        print("All done!")
+        return
+
+    if args.vastai_reboot:
+        print(f"Rebooting Vast.ai instance {selected_id} ...")
+        subprocess.check_output(['python3', vastpath.as_posix(), 'reboot instance', str(selected_id)]).decode('utf-8')
+
     # 2. Wait for instance to be ready
     # ----------------------------------------
     instance = wait_for_instance(selected_id)
@@ -286,6 +326,7 @@ def deploy_vastai():
     dst = Path("/workspace/discore_deploy")
     src_session = session.dirpath
     dst_session = dst / 'sessions' / session.dirpath.stem
+    install_checkpath = "/root/.discore_installed"
     ssh_cmd = f"ssh -p {port} {user}@{ip}"
     kitty_cmd = f"kitty +kitten {ssh_cmd}"
     discore_cmd = f"cd /workspace/discore_deploy/; {vastai_python_bin} {dst / 'discore.py'} {session.name} --cli --remote --unsafe --no_venv"
@@ -298,10 +339,14 @@ def deploy_vastai():
     print('----------------------------------------')
     print("")
 
+    # SSH connection
+    # ----------------------------------------
+
     ssh = DiscoreSSHClient()
     ssh.load_host_keys(os.path.expanduser(os.path.join('~', '.ssh', 'known_hosts')))
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
+    num_connection_failure = 0
     while True:
         try:
             # This can fail when the instance just launched
@@ -310,8 +355,19 @@ def deploy_vastai():
         except NoValidConnectionsError as e:
             print(f"Failed to connect ({e}), retrying...")
             time.sleep(3)
+            num_connection_failure += 1
         except SSHException as e:
-            os.system(kitty_cmd)
+            os.system(ssh_cmd)
+
+    if num_connection_failure > 0:
+        print(f"Successfully connected through SSH after {num_connection_failure} retries.")
+        if num_connection_failure > 10:
+            print("Jeez, why did that take so many tries?")
+    elif num_connection_failure == 0:
+        print("Successfully connected through SSH.")
+
+    # SFTP connection
+    # ----------------------------------------
 
     from src.deploy.sftpclient import SFTPClient
     sftp = SFTPClient.from_transport(ssh.get_transport())
@@ -324,17 +380,14 @@ def deploy_vastai():
     sftp.ip = ip
     sftp.port = port
 
-    is_fresh_install = not (ssh.file_exists(dst) and jargs.is_vastai_continue)
+    if not is_fresh_install:
+        is_fresh_install = not sftp.exists(install_checkpath)
 
-    if userconf.vastai_sshfs:
-        local_path = Path(userconf.vastai_sshfs_path).expanduser() / 'discore_deploy'
-        thread = threading.Thread(target=ssh.mount, args=(local_path, '/workspace/discore_deploy', ip, port))
-        thread.start()
-        # mount()
+    print("Is fresh install:", is_fresh_install)
 
     # rm -rf existing & Clone
     # ----------------------------------------
-    if is_fresh_install:
+    if not ssh.file_exists(dst) and not jargs.is_vastai_continue:
         if ssh.file_exists(dst):
             print(chalk.red("Removing old deploy..."))
             time.sleep(3)
@@ -345,115 +398,90 @@ def deploy_vastai():
         for cmd in cmds:
             ssh.run(' '.join(cmd))
 
-    # if is_fresh_install:
-    #     mountdir = Path(userconf.vastai_sshfs_path).expanduser()
-    #     open_in_explorer(mountdir)
+    if userconf.vastai_sshfs:
+        local_path = Path(userconf.vastai_sshfs_path).expanduser() / 'discore_deploy'
+        thread = threading.Thread(target=ssh.mount, args=(local_path, '/workspace/discore_deploy', ip, port))
+        thread.start()
+        # mount()
 
-    # Install deps
+    # Install system packages
     # ----------------------------------------
 
     if is_fresh_install:
-        print_header("Installing system libraries...")
-        ssh.run(f"apt-get install python3-venv -y")
-        ssh.run(f"apt-get install libgl1 -y")
-        ssh.run(f"apt-get install zip -y")
-        ssh.run(f"apt-get install ffmpeg -y")
+        print_header("Installing system packages ...")
+        for apt_package in apt_packages:
+            print(f"Installing {apt_package}...")
+            ssh.run(f"apt-get install {apt_package} -y")
+
         ssh.run(f"chmod +x {dst / 'discore.py'}")
         # ssh.run(ssh, f"rm -rf {dst / 'venv'}")
 
     # Copy files
     # ----------------------------------------
     # if is_fresh_install or args.vastai_copy:
-    print_header("File copies...")
-    for file in deploy_rsync:
-        if isinstance(file, str):
-            sftp.put_any(src / file, dst / file, rsync_includes=[f'*{v}' for v in paths.text_exts])
-        if isinstance(file, tuple):
-            sftp.put_any(src / file[0], dst / file[1])
+    if not args.vastai_quick:
+        sync_files(src, dst, sftp)
 
     # Copy res
     # ----------------------------------------
     # This is slow and usually only needed for the first time
     if is_fresh_install or args.vastai_copy:
-        for file in deploy_put:
-            if isinstance(file, str):
-                sftp.put_any(src / file, dst / file, forbid_rsync=True)
-            if isinstance(file, tuple):
-                sftp.put_any(src / file[0], dst / file[1], forbid_rsync=True)
-
-        sftp.close()
+        sync_res(src, dst, sftp)
 
     # --shell
     # ----------------------------------------
     if args.shell:
-        import interactive
-        print_header("user --shell")
-        # Start a ssh shell for the user
-        channel = ssh.invoke_shell()
-        interactive.interactive_shell(channel)
+        open_shell(ssh)
 
     # pip & plugin install
     # ----------------------------------------
     if is_fresh_install or args.vastai_upgrade:
         print_header("Discore pip refresh")
-        ssh.run(discore_cmd + " --upgrade", log_output=True)
+        subprocess.run(f"{ssh_cmd} '{discore_cmd}' --upgrade", shell=True)
+        # ssh.run(f"{discore_cmd} --upgrade")
 
-    if is_fresh_install or args.vastai_upgrade or args.vastai_install:
-        print_header("Discore plugin install")
-        ssh.run(discore_cmd + " --install --dry", log_output=True)
+    # Uninstall numba
+    # subprocess.run(f"{ssh_cmd} {vastai_python_bin} -m pip uninstall numba -y", shell=True)
+
+
+    ssh.run(f"touch {install_checkpath}")
 
     # Session state copies
-    if not args.vastai_continue_quick:
-        if session is not None and session.dirpath.exists():
-            print_header(f"Copying session '{session.dirpath.stem}'")
-
-            upload_list = []
-            for file in session.dirpath.iterdir():
-                if file.stem.isnumeric() and paths.is_image(file):
-                    num = int(file.stem)
-                    # print(num, session.f_last)
-                    if num < session.f_last - 1:
-                        continue
-                if file.name in excludes_rsync_upload: continue
-                if file.is_dir(): continue
-                upload_list.append(file)
-
-            for v in upload_list:
-                sftp.put_any(v, dst_session / v.name, force_rsync=False)
-                # sftp.put_any(src_session, dst_session, force_rsync=False, rsync_includes=[v.name for v in upload_list])
-            # sftp.put_any(session.dirpath, dst_session, forbid_recursive=True, rsync_excludes=excludes_rsync_upload)
-
-            # Open in nvim
-            # if session.res("script.py").exists() and userconf.vastai_sshfs:
-            #     d = mountdir / 'discore_deploy' / paths.sessions_name / session.dirpath.stem / 'script.py'
-            #     subprocess.Popen(f"kitty nvim {d}", shell=True)
-
-            # sftp.mkdir(str(dst_session))
-            # # Iterate files in dirpath
-            # for file in session.dirpath.iterdir():
-            #     # If the stem is not an int
-            #     if not file.stem.isnumeric():
-            #         sftp.put_any(str(file), str(dst_session / file.name), forbid_rsync=True)
+    # ----------------------------------------
+    if not args.vastai_quick:
+        copy_session(session, dst_session, sftp)
 
     continue_work = True
 
+    # ----------------------------------------
+    # It's pizza time
+    # ----------------------------------------
+
     def vastai_job():
+        # For some reason abs path to python3 doesnt work here with os.system
         cmd = f"cd /workspace/discore_deploy/; {vastai_python_bin} {dst / 'discore.py'}"
+        # cmd = f"{vastai_python_bin} {dst / 'discore.py'}"
 
         oargs = argv
-        safe_list_remove(oargs, '--vastai')
-        safe_list_remove(oargs, '--vai')
-        safe_list_remove(oargs, '--vastai_continue')
-        safe_list_remove(oargs, '--vastai_continue_quick')
-        safe_list_remove(oargs, '--vaic')
+        jargs.remove_deploy_args(oargs)
         cmd += f' {" ".join(oargs)}'
-        cmd += " --run --cli --remote --unsafe --no_venv"
+        cmd += " --run -cli --remote --unsafe --no_venv"
 
         print_header("Launching discore for work ...")
         print("")
-        ssh.run(cmd, log_output=True)
+
+        if is_fresh_install or args.vastai_upgrade or args.vastai_install:
+            cmd += " --install"
+
+        if args.vastai_trace:
+            cmd += " --trace"
 
         nonlocal continue_work
+        while continue_work:
+            print("> " + cmd)
+            # ssh.run(cmd, log_output=True)
+            os.system(f"{ssh_cmd} '{cmd}'")
+            # sync_files(src, dst, sftp)
         continue_work = False
         renderer.request_stop = True
 
@@ -468,15 +496,19 @@ def deploy_vastai():
 
         notifier = DesktopNotifier()
         last_balance = None
+        elapsed = 0
         while continue_work:
-            balance = fetch_balance()
-            if last_balance is None or balance - last_balance > threshold:
-                last_balance = balance
-                notifier.send_sync(title='Vast.ai balance', message=f'{balance:.02f}$')
+            if elapsed > 5:
+                elapsed = 0
+                balance = fetch_balance()
+                if last_balance is None or balance - last_balance > threshold:
+                    last_balance = balance
+                    notifier.send_sync(title='Vast.ai balance', message=f'{balance:.02f}$')
 
-            time.sleep(5)
+            time.sleep(0.1)
+            elapsed += 0.1
 
-    def rsync_job():
+    def upload_job():
         """
         Detect changes to the code (in src/scripts) and copy them up to the server (to dst/scripts)
         """
@@ -488,37 +520,64 @@ def deploy_vastai():
             nonlocal changed_files
             changed_files.append(f)
 
-        watch = Watcher([paths.scripts, session.dirpath / 'script.py'], [execute])
-        elapsed = 0
+
+        watch = Watcher([*rsync_job_upload_paths, session.dirpath / 'script.py'], [execute])
+        elapsed = 999
         while continue_work:
-            time.sleep(0.5)
-            elapsed += 0.5
-            watch.monitor_once()
+            if elapsed > 1:
+                elapsed = 0
+                watch.monitor_once()
 
-            for f in changed_files:
-                f = Path(f)
-                print(chalk.blue_bright("Changed", f.relative_to(src)))
-                relative = Path(f).relative_to(src)
+                for f in changed_files:
+                    f = Path(f)
+                    print(chalk.blue_bright("Changed", f.relative_to(src)))
+                    relative = Path(f).relative_to(src)
 
-                src2 = src / relative
-                dst2 = dst / relative
-                os.system(f"rsync -avz -e 'ssh -p {port}' {src2} root@{ip}:{dst2}")
+                    src2 = src / relative
+                    dst2 = dst / relative
+                    subprocess.run(f"rsync -avz -e 'ssh -p {port}' {src2} root@{ip}:{dst2} --exclude '.*/'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            changed_files.clear()
+                changed_files.clear()
 
-            # Download the session every 1.5 second
-            if elapsed > 1.5:
-                src2 = dst / paths.sessions_name / session.name
-                dst2 = src / paths.sessions_name
+            time.sleep(0.25)
+            elapsed += 0.25
+    def download_job():
+        """
+        Detect changes to the code (in src/scripts) and copy them up to the server (to dst/scripts)
+        """
+        from src.deploy.watch import Watcher
+
+        elapsed = 999
+        while continue_work:
+            # Download the latest frames every 1.5 second
+            if elapsed > 3.0:
+                elapsed = 0
+                src2 = src / paths.sessions_name
+                dst2 = dst / paths.sessions_name / session.name
+
+                # while True:
+                #     src_file = session.det_frame_path(session.f_last + 1)
+                #     dst_file = dst2 / src_file.name
+                #     exists = sftp.exists(dst_file)
+                #     print(src_file, dst_file, exists)
+                #     if exists:
+                #         sftp.get_file(dst_file, src_file)
+                #         session.f_last += 1
+                #         session.f_last_path = session.det_frame_path(session.f_last)
+                #     else:
+                #         break
 
                 # Exclude video.mp4 and video__*.mp4
-                cmd = f"rsync -az -e 'ssh -p {port}' root@{ip}:{src2} {dst2}"
-
-                for fname in excludes_rsync_download:
+                cmd = f"rsync -az -e 'ssh -p {port}' root@{ip}:{dst2} {src2}"
+                for fname in rsync_job_download_exclusion:
                     cmd += f" --exclude '{fname}'"
+                cmd += " --exclude '.*/'"
 
-                os.system(cmd)
-                elapsed = 0
+                # os.system(cmd)
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+
+            time.sleep(0.25)
+            elapsed += 0.25
 
     # TODO readonly renderer job
     def renderer_job():
@@ -526,27 +585,44 @@ def deploy_vastai():
         Render the video in the background
         """
         # renderer.is_dev = True
-        renderer.is_readonly = True
-        renderer.is_dev = True
+        renderer.enable_readonly = True
+        renderer.enable_dev = True
         renderer.unsafe = False
-        renderer.init(main_thread=True)
-        renderer.loop()
+        renderer.init()
+        renderer.run_loop()
 
     t1 = threading.Thread(target=vastai_job)
     t2 = threading.Thread(target=balance_job)
-    t3 = threading.Thread(target=rsync_job)
-    # t4 = threading.Thread(target=renderer_job)
+    t3 = threading.Thread(target=upload_job)
+    t4 = threading.Thread(target=download_job)
+    # t5 = threading.Thread(target=renderer_job)
 
     t1.start()
     t2.start()
     t3.start()
-    # t4.start()
+    t4.start()
+
     # vastai_job()
     renderer_job()
+    continue_work = False
+    renderer.stop()
+
     t1.join()
     t2.join()
     t3.join()
-    # t4.join()
+    t4.join()
+
+    def on_ctrl_c():
+        nonlocal continue_work
+        continue_work = False
+        renderer.stop()
+        print("Stopping ...")
+        time.sleep(1)
+        print("Stopped")
+        sys.exit(0)
+
+
+    setup_ctrl_c(on_ctrl_c)
 
     print(f"Remaining balance: {fetch_balance():.02f}$")
 
@@ -558,14 +634,46 @@ def deploy_vastai():
 
 
     # interactive.interactive_shell(channel)
+def copy_session(src_session, dst_session, sftp):
+    if src_session is not None and src_session.dirpath.exists():
+        print_header(f"Copying session '{src_session.dirpath.stem}'")
+        sftp.mkdir(str(dst_session))
+        sftp.put_any(src_session.dirpath, dst_session, forbid_recursive=True)
+    # MANUAL SOLUTION BELOW
+    #     upload_list = []
+    #     for file in session.dirpath.iterdir():
+    #         if file.stem.isnumeric() and paths.is_image(file):
+    #             num = int(file.stem)
+    #             # print(num, session.f_last)
+    #             if num < session.f_last:
+    #                 continue
+    #         if file.name in deploy_upload_blacklist_paths: continue
+    #         if file.is_dir(): continue
+    #         upload_list.append(file)
+    #
+    #     for v in upload_list:
+    #         sftp.put_any(v, dst_session / v.name, force_rsync=True)
+    # sftp.put_any(src_session, dst_session, force_rsync=False, rsync_includes=[v.name for v in upload_list])
+def open_shell(ssh):
+    import interactive
+    print_header("user --shell")
+    # Start a ssh shell for the user
+    channel = ssh.invoke_shell()
+    interactive.interactive_shell(channel)
+def sync_res(src, dst, sftp):
+    for file in deploy_upload_paths_sftp:
+        if isinstance(file, str):
+            sftp.put_any(src / file, dst / file, forbid_rsync=True)
+        if isinstance(file, tuple):
+            sftp.put_any(src / file[0], dst / file[1], forbid_rsync=True)
+def sync_files(src, dst, sftp):
+    print_header("File copies...")
+    for file in deploy_upload_paths:
+        if isinstance(file, str):
+            sftp.put_any(src / file, dst / file, rsync_includes=[f'*{v}' for v in paths.text_exts])
+        if isinstance(file, tuple):
+            sftp.put_any(src / file[0], dst / file[1])
 
-
-def safe_list_remove(l, value):
-    if not l: return
-    try:
-        l.remove(value)
-    except:
-        pass
 
 class DiscoreSSHClient(paramiko.SSHClient):
     def run(self, cm, cwd=None, *, log_output=False):
@@ -579,7 +687,7 @@ class DiscoreSSHClient(paramiko.SSHClient):
 
         cm = f"/bin/bash -c '{cm}'"
         print_cmd(cm)
-        stdin, stdout, stderr = ssh.exec_command(cm)
+        stdin, stdout, stderr = ssh.exec_command(cm, get_pty=True)
         stdout.channel.set_combine_stderr(True)
         ret = ''
         for line in stdout:

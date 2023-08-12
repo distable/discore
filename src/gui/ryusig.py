@@ -5,6 +5,8 @@ from colorsys import hsv_to_rgb
 from enum import Enum
 
 import numpy as np
+from PyQt6.QtCore import QPoint
+from PyQt6.QtGui import QScreen
 
 from src import renderer
 from src.party import maths
@@ -13,6 +15,8 @@ from .QtUtils import get_keypress_args
 from .RyuPlotWidget import RyuPlotWidget
 from .RyuPlotWindow import RyuPlotWindow
 from .RyuTextEdit import RyuTextEdit
+from ..renderer import RendererState, RenderMode
+from ..rendering import hobo
 
 pyexec = exec  # this gets replaced when you import * from pyqt
 
@@ -24,7 +28,7 @@ from PyQt6.QtWidgets import *
 from pyqtgraph import *
 import pyqtgraph as pg
 
-pg.setConfigOptions(antialias=False, useOpenGL=False)
+pg.setConfigOptions(antialias=False, useOpenGL=False, useNumba=True, segmentedLineMode='on', mouseRateLimit=30)
 
 rgb_to_hex = lambda tuple: f"#{int(tuple[0] * 255):02x}{int(tuple[1] * 255):02x}{int(tuple[2] * 255):02x}"
 
@@ -72,8 +76,8 @@ def on_start_playback():
 
 
 def init():
-    global initialized
     from src import renderer
+    global initialized
     global app
 
     app = RyusigApp()
@@ -81,6 +85,7 @@ def init():
     app.init_qapp()
     app.init_qwindow()
 
+    # Set position on the screen to bottom half (use setGeometry)
     app.win.hide()  # hidden by default on startup
     app.win.update()
 
@@ -112,7 +117,8 @@ class RyusigApp:
 
         # State
         self.mouse_signal_index = -1
-        self.x_mouse_time_sec = 0.0
+        self.mouse_x_seconds = 0.0
+        self.mouse_y = 0.0
         self.clines = []
         self.cnames = []
         self.csignals = []
@@ -124,6 +130,12 @@ class RyusigApp:
         self.win = None
         self.winput = None
 
+        # Features
+        # ----------------------------------------
+        self.norm_mode = False
+        self.last_xrange = 0
+        self.last_yrange = 0
+
 
     def init_qapp(self):
         pg.mkQApp("Ryusig")
@@ -131,6 +143,15 @@ class RyusigApp:
     def init_qwindow(self):
         self.win = RyuPlotWindow()
         self.win.resize(1280, 720)
+        # Set window to the bottom half of the screen
+        screen = QScreen.availableGeometry(QApplication.primaryScreen())
+        from src.rendering import hobo
+        size = 1, 1 - hobo.window_separation
+        anchor = 0, 1
+        self.win.setGeometry(int(screen.width() * anchor[0]),
+                             int(screen.height() * anchor[1]),
+                             int(screen.width() * size[0]),
+                             int(screen.height() * size[1]))
 
         vstack = QVBoxLayout()
         vstack.setSpacing(0)
@@ -214,6 +235,7 @@ class RyusigApp:
         self.vplot.sceneObj.sigMouseClicked.connect(self.on_plot_click)
         self.win.sigResize.connect(on_win_resize)
         self.win.sigKeyPress.connect(self.on_win_keypress)
+        self.win.sigFocusIn.connect(self.on_win_focus)
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.on_timer_update)
         self.timer.start(int(1000 / 60))  # 60 fps timer
@@ -248,6 +270,10 @@ class RyusigApp:
             n /= rv.fps
         self.time_array = np.linspace(0, n, rv.n)
 
+        if self.norm_mode:
+            ymax = np.max([np.max(np.abs(x)) for x in new_signals])
+            new_signals = [x / ymax for x in new_signals]
+
         for i, signal in enumerate(new_signals):
             signal = np.nan_to_num(signal)
             signal = np.pad(signal, (0, self.time_array.shape[0] - signal.shape[0]), 'edge')
@@ -265,6 +291,8 @@ class RyusigApp:
 
         self.vbplot.removeItem(self.wtarget)
         self.vbplot.addItem(self.wtarget, ignoreBounds=True)
+
+        # self.update_yrange()
 
         # renderer.audio.update(self.csignals, self.cnames)
 
@@ -305,7 +333,6 @@ class RyusigApp:
                 pass
 
         if len(found_signals):
-            self.playback_iwav = None
             self.set_signals(found_signals, strings)
             return True
         return False
@@ -316,7 +343,8 @@ class RyusigApp:
         f = x_to_frame(x)
         t = x_to_seconds(x)
 
-        self.x_mouse_time_sec = t
+        self.mouse_y = y
+        self.mouse_x_seconds = t
         self.set_playback_t(t)
 
         # Update the label and target
@@ -371,7 +399,7 @@ class RyusigApp:
 
     def on_text_changed(self):
         if self.eval(self.winput.toPlainText()):
-            self.wplot.autoRange()
+            pass
 
     def on_clipboard_change(self):
         if QApplication.focusWindow() is not None: return
@@ -400,12 +428,6 @@ class RyusigApp:
                 # Note: this will also dispatch text changed event
                 self.winput.setText(symbols)
 
-    def on_win_keypress(self, ev):
-        key, ctrl, shift, alt = get_keypress_args(ev)
-        if key == QtCore.Qt.Key.Key_F1:
-            toggle()
-        elif key == QtCore.Qt.Key.Key_Escape:
-            toggle()
 
     def on_plot_move(self, ev):
         mp = self.vbplot.mapSceneToView(ev)
@@ -413,13 +435,43 @@ class RyusigApp:
         y = mp.y()
         self.mousepos = mp
 
-        if ev is not None and renderer.paused:
+        if ev is not None and renderer.state == RendererState.READY and renderer.mode == RenderMode.PAUSE:
             self.set_mouse_pos(x, y)
             renderer.seek(x_to_frame(x), clamp=False)
 
     def on_plot_click(self, ev):
         if ev.button() == 4:
             self.wplot.autoRange()
+
+    def on_win_keypress(self, ev):
+        key, ctrl, shift, alt = get_keypress_args(ev)
+        scale = 0.33
+
+        if key == QtCore.Qt.Key.Key_F1:
+            toggle()
+        elif key == QtCore.Qt.Key.Key_Escape:
+            if self.winput.hasFocus():
+                self.winput.clearFocus()
+                self.vplot.setFocus()
+            else:
+                toggle()
+                # self.wplot.clearFocus()
+                # self.winput.setFocus()
+        # ctrl-shift-minus and ctrl-shift-plus to zoom in/out vertically
+        elif ctrl and shift and key == QtCore.Qt.Key.Key_Underscore:
+            self.vbplot.scaleBy(y=1-scale)
+        elif ctrl and shift and key == QtCore.Qt.Key.Key_Plus:
+            self.vbplot.scaleBy(y=1+scale)
+        # ctrl-minus and ctrl-plus to zoom in/out horizontally
+        elif ctrl and key == QtCore.Qt.Key.Key_Minus:
+            self.vbplot.scaleBy(x=1-scale)
+        elif ctrl and key == QtCore.Qt.Key.Key_Equal:
+            self.vbplot.scaleBy(x=1-scale)
+
+    def on_win_focus(self):
+        # self.center_on_x(seconds_to_x(rv.t), 6)
+        hobo.win.raise_()
+        pass
 
     def on_plot_keypress(self, ev):
         # Proxy to text input
@@ -432,17 +484,41 @@ class RyusigApp:
         global time_mode
         audio = renderer.audio
 
-        if ev.key() == QtCore.Qt.Key.Key_Up:
-            audio.set_wav(-1)
-        elif ev.key() == QtCore.Qt.Key.Key_Down:
-            audio.set_wav(1)
+        ctrl = ev.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
+        shift = ev.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier
+
+        if ev.key() == QtCore.Qt.Key.Key_Control or ev.key() == QtCore.Qt.Key.Key_Shift:
+            return
+
+        # if ev.key() == QtCore.Qt.Key.Key_Up:
+        #     audio.set_wav(-1)
+        # elif ev.key() == QtCore.Qt.Key.Key_Down:
+        #     audio.set_wav(1)
+        if hobo.handle_seek(ev.key()):
+            pass
         elif ev.key() == QtCore.Qt.Key.Key_F2:
             time_mode = TimeMode((time_mode.value + 1) % len(TimeMode))
             self.set_signals([*self.csignals])
         elif ev.key() == QtCore.Qt.Key.Key_Space:
-            self.set_mouse_pos(self.mousepos.x(), self.mousepos.y())
-            renderer.seek(to_frame(self.x_mouse_time_sec), clamp=False)
-            renderer.pause()
+            audio.desired_name = self.cnames[0]
+            self.set_mouse_pos(seconds_to_x(self.mouse_x_seconds), self.mouse_y)
+            renderer.seek(to_frame(self.mouse_x_seconds), clamp=False)
+            renderer.toggle_pause()
+        elif ev.key() == QtCore.Qt.Key.Key_Backslash:
+            self.encompass_on_y()
+            self.center_on_x(seconds_to_x(session.t))
+            self.range_on_x(seconds_to_x(6))
+        elif ev.key() == QtCore.Qt.Key.Key_Tab:
+            self.norm_mode = True
+            self.refresh_signals()
+        elif ev.key() == QtCore.Qt.Key.Key_Escape:
+            toggle()
+        elif ev.key() == QtCore.Qt.Key.Key_M and ctrl and shift:
+            s = rv.get_timestamp_string('chapters')
+
+            # Copy to clipboard
+            QApplication.clipboard().setText(s)
+
         else:
             self.winput.setFocus()
             self.winput.keyPressEvent(ev)
@@ -469,29 +545,95 @@ class RyusigApp:
         if self.winput.alignment() != QtCore.Qt.AlignmentFlag.AlignCenter:
             self.winput.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
-        # TODO this may not be required
-        if not renderer.paused:
+        if not renderer.is_paused():
             f = renderer.session.f
             t = to_seconds(f)
             x = frame_to_x(f)
-            self.set_mouse_pos(x, 0)
-            self.set_playback_t(t)
+            # self.set_mouse_pos(x, self.mouse_y)
+            # self.set_playback_t(t)
 
-            signal = self.get_mouse_signal()
-            if signal is not None:
-                # Prevent moving too far out of view
-                # self.wplot.setLimits(yMax=np.max(signal), yMin=np.min(signal))
+            # signal = self.get_mouse_signal()
+            # if signal is not None:
+            #     self.center_on_x(x)
+            self.win.centralWidget().repaint()
+        # else:
+        #     self.update_yrange()
 
-                # Auto scroll
-                # self.wplot.state
-                xmin = self.wplot.getViewBox().state['viewRange'][0][0]
-                xmax = self.wplot.getViewBox().state['viewRange'][0][1]
-                xrange = xmax - xmin
+    def update_yrange(self):
+        xrange, yrange = self.get_window_range()
 
-                self.wplot.setRange(xRange=(x - xrange/2, x + xrange/2), padding=0)
-                # [[97.83592927104186, 181.01566253303446], [10.007122858653815, 84.61397017678364]]
+        if len(self.csignals) > 0 and (xrange != self.last_xrange or yrange != self.last_yrange):
+            self.encompass_on_y()
+
+        self.last_xrange = xrange
+        self.last_yrange = yrange
+
+    def get_window_range(self):
+        viewrange = self.get_viewrange()
+        xmax, xmin, ymax, ymin = self.get_window_bounds()
+        xrange = xmax - xmin
+        yrange = ymax - ymin
+        return xrange, yrange
+
+    def get_window_bounds(self):
+        xmin = self.get_vxrange()[0]
+        xmax = self.get_vxrange()[1]
+        ymin = self.get_vyrange()[0]
+        ymax = self.get_vyrange()[1]
+        return xmin, xmax, ymin, ymax
+
+    def get_xmin(self):
+        return self.get_window_bounds()[0]
+
+    def get_xmax(self):
+        return self.get_window_bounds()[1]
+
+    def get_ymin(self):
+        return self.get_window_bounds()[2]
+
+    def get_ymax(self):
+        return self.get_window_bounds()[3]
+
+    def get_vxrange(self):
+        return self.get_viewrange()[0]
+
+    def get_vyrange(self):
+        return self.get_viewrange()[1]
+
+    def get_viewrange(self):
+        viewrange = self.wplot.getViewBox().state['viewRange']
+        return viewrange
+
+    def encompass_on_y(self, only_viewed=True):
+        xrange, yrange = self.get_window_range()
+
+        if only_viewed:
+            viewed_xrange_f_min = x_to_frame(self.get_xmin())
+            viewed_xrange_f_max = x_to_frame(self.get_xmax())
+            viewed_xrange_f_min = np.clip(viewed_xrange_f_min, 0, len(self.time_array) - 1)
+            viewed_xrange_f_max = np.clip(viewed_xrange_f_max, 0, len(self.time_array) - 1)
         else:
-            self.wplot.setLimits(yMax=sys.float_info.max, yMin=-sys.float_info.max)
+            viewed_xrange_f_min = 0
+            viewed_xrange_f_max = len(self.time_array) - 1
+
+        ymax = np.max([np.max(s[viewed_xrange_f_min:viewed_xrange_f_max]) for s in self.csignals])
+        ymin = np.min([np.min(s[viewed_xrange_f_min:viewed_xrange_f_max]) for s in self.csignals])
+
+        # self.wplot.setLimits(yMax=ymax, yMin=ymin)
+        padding = 0.1
+        self.wplot.setRange(yRange=(ymin - yrange * padding, ymax + yrange * padding), padding=0)
+
+    def center_on_x(self, x, newrange=None):
+        xrange, yrange = self.get_window_range()
+        self.wplot.setRange(xRange=(x - xrange / 2, x + xrange / 2), padding=0)
+        if newrange:
+            self.range_on_x(newrange)
+        app.set_mouse_pos(seconds_to_x(x), app.mouse_y)
+
+    def range_on_x(self, newrange):
+        xmin, xmax, ymin, ymax = self.get_window_bounds()
+        xcenter = (xmin + xmax) / 2
+        self.wplot.setRange(xRange=(xcenter - newrange / 2, xcenter + newrange / 2), padding=0)
 
 def get_env():
     envdic = {}
@@ -514,12 +656,6 @@ def get_env():
     envdic['rv'] = rv
 
     return envdic
-
-def to_seconds(frame):
-    return np.clip(frame, 0, rv.n - 1) / rv.fps
-
-def to_frame(t):
-    return int(np.clip(t * rv.fps, 0, rv.n - 1))
 
 def x_to_seconds(x):
     if time_mode == TimeMode.Seconds:
@@ -591,9 +727,9 @@ def find_signal(word):
 
 def mkTlinePen():
     if renderer.audio.is_playing():
-        return mkPen('white', width=1, style=QtCore.Qt.PenStyle.SolidLine)
+        return mkPen('green', width=2, style=QtCore.Qt.PenStyle.SolidLine)
     else:
-        return mkPen('white', width=1, style=QtCore.Qt.PenStyle.DotLine)
+        return mkPen('white', width=2, style=QtCore.Qt.PenStyle.DotLine)
 
 
 def mod2dic(module):
@@ -629,12 +765,29 @@ def toggle():
     if not initialized:
         init()
 
+    from src.rendering import hobo
+
     w = app.win
     if w.isVisible():
         app.win.hide()
+        hobo.win.showNormal()
+        hobo.win.raise_()
+        hobo.win.setWindowState(QtCore.Qt.WindowState.WindowActive)
     else:
         app.win.show()
         app.win.raise_()
+        app.win.setWindowState(QtCore.Qt.WindowState.WindowActive)
+        app.vplot.setFocus()
+        app.center_on_x(frame_to_x(session.f))
+        # hobo.win.hide()
+
 def refresh():
-    if initialized:
-        app.refresh_signals()
+    if not initialized: return
+    app.refresh_signals()
+
+def on_hobo_seek(frame):
+    if not initialized: return
+    app.center_on_x(frame_to_x(frame))
+
+to_frame = rv.to_frame
+to_seconds = rv.to_seconds

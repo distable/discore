@@ -1,0 +1,11 @@
+{
+  version: 1,
+  mediaFileName: 'shp-eclipse-6.mp4',
+  cutSegments: [
+    {
+      start: 134.466637,
+      end: 157.015761,
+      name: '',
+    },
+  ],
+}

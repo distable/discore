@@ -1,6 +1,6 @@
 import json
 import numpy as np
-from bunch import Bunch
+from munch import Munch
 
 
 def export_frames(filename, g, *names):
@@ -25,7 +25,7 @@ def load_frames(filename):
     """
     with open(filename, 'r') as f:
         o = json.load(f)
-        ret = Bunch()
+        ret = Munch()
         for pair in o.items():
             ret[pair[0]] = np.array(pair[1])
 

@@ -45,6 +45,13 @@ class Plugin:
         """
         return paths.plug_res / self.id / join
 
+    def src(self, join='')->Path:
+        """
+        Returns: The source directory for this plugin
+        """
+        return paths.root / paths.src_plugins_name / self.id / join
+
+
     def logs(self, join='') -> Path:
         """
         Returns: The log directory for this plugin

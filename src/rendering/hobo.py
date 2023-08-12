@@ -18,6 +18,7 @@ from jargs import args
 
 import jargs
 import uiconf
+from src.renderer import RendererState, RenderingRepetition, RenderMode
 from src.rendering import hud
 from src.classes import paths
 from src.classes.Session import Session
@@ -25,7 +26,12 @@ from src.lib import corelib
 from src.gui import ryusig
 from src import renderer
 from src.gui.AudioPlayback import AudioPlayback
+from src.rendering.HoboWindow import HoboWindow
 from src.rendering.rendervars import RenderVars
+from pygame import draw
+
+QAPP_NAME = 'Discore'
+QWIN_TITLE = 'Discore'
 
 environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 import pygame
@@ -43,14 +49,57 @@ sel_snapshot = -1
 
 last_vram_reported = 0
 
-surface: pygame.Surface|None = None
-font: pygame.font.Font|None = None
+surface: pygame.Surface | None = None
+font: pygame.font.Font | None = None
 copied_frame = 0
 current_segment = -1
 invalidated = True
 colors = corelib.generate_colors(8, v=1, s=0.765)
-rv:RenderVars|None = None
+rv: RenderVars | None = None
 audio = AudioPlayback()
+win: HoboWindow | None = None
+
+window_separation = 0.55
+window_padding = 0.025
+
+def run():
+    import pyqtgraph
+    from PyQt6 import QtCore, QtGui
+    from PyQt6.QtWidgets import QApplication
+
+    global win
+
+    pyqtgraph.mkQApp(QAPP_NAME)
+
+    audio.init('*', root=rv.session.dirpath)
+    init(rv)
+    # ryusig.init()
+
+    # Setup Qt window
+    win = HoboWindow(surface)
+    win.resize(rv.session.w, rv.session.h)
+    win.setWindowTitle(QWIN_TITLE)
+    win.setWindowIcon(QtGui.QIcon(paths.hobo_icon.as_posix()))
+    win.show()
+    win.timeout_handlers.append(lambda: update())
+    win.key_handlers.append(lambda k, ctrl, shift, alt: keydown(k, ctrl, shift, alt))
+    win.dropenter_handlers.append(lambda f: dropenter(f))
+    win.dropfile_handlers.append(lambda f: dropfile(f))
+    win.dropleave_handlers.append(lambda f: dropleave(f))
+    win.focusgain_handlers.append(lambda: focusgain())
+    win.focuslose_handlers.append(lambda: focuslose())
+
+    screen = QtGui.QGuiApplication.primaryScreen().availableGeometry()
+    winpos = 0.5, window_separation
+    winanchor = 0.5, 1
+    win.move(int(screen.width() * winpos[0] - win.width() * winanchor[0]),
+             int(screen.height() * winpos[1] - win.height() * winanchor[1] - window_padding * screen.height())
+             )
+
+    # app.exec_()
+    import sys
+    if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
+        QApplication.instance().exec()
 
 def init(_rv):
     global enable_hud
@@ -67,10 +116,25 @@ def init(_rv):
     # Setup pygame renderer
     ryusig.rv = rv
     pygame.init()
-    surface = pygame.Surface((session.w, session.h))
-    surface.fill((255, 0, 255))
+    update_surface()
     fontsize = 15
     font = pygame.font.Font(paths.gui_font.as_posix(), fontsize)
+
+def update_surface():
+    global surface
+    session = renderer.session
+    if surface is None or session.w != surface.get_width() or session.h != surface.get_height():
+        surface = pygame.Surface((session.w, session.h))
+        surface.fill((255, 0, 255))
+        if win is not None:
+            win.set_surface(surface)
+            w = session.w
+            h = session.h
+            cx = win.x() + win.width() / 2
+            cy = win.y() + win.height() / 2
+            # Resize and preserve center anchor
+            win.resize(w, h)
+            win.move(int(cx - w / 2), int(cy - h / 2))
 
 
 def update():
@@ -82,18 +146,28 @@ def update():
     global f_update
     global surface
 
-    audio.flush_requests()
+    if renderer.is_running():
+        if renderer.enable_readonly and f_update % 120 == 0 and renderer.is_paused():
+            refresh_session()
 
-    if f_update % 60 == 0:
-        # Update VRAM using nvidia-smi
-        last_vram_reported = subprocess.check_output(['nvidia-smi', '--query-gpu=memory.used', '--format=csv,noheader,nounits']).decode('utf-8').strip()
-        last_vram_reported = int(last_vram_reported)
+        f_update += 1
+        if f_update % 60 == 0:
+            # Update VRAM using nvidia-smi
+            last_vram_reported = subprocess.check_output(['nvidia-smi', '--query-gpu=memory.used', '--format=csv,noheader,nounits']).decode('utf-8').strip()
+            last_vram_reported = int(last_vram_reported)
 
-    if renderer.is_readonly and f_update % 120 == 0 and renderer.paused:
-        refresh_session()
+        audio.flush_requests()
 
-    if not renderer.request_stop:
+        session = rv.session
+        # changed = renderer.invalidated or invalidated
+        # if changed or f_displayed != session.f or renderer.state == RendererState.RENDERING:
         draw()
+
+        if renderer.is_gui_dispatch(): # renderer.enable_dev and
+            renderer.iter_loop()
+    else:
+        from PyQt6.QtWidgets import QApplication
+        QApplication.instance().quit()
 
 
 def draw():
@@ -117,22 +191,24 @@ def draw():
     f_first = session.f_first
     f = session.f
 
-    fps = 1 / max(renderer.last_frame_dt, 1 / rv.fps)
+    fps = 1 / max(renderer.loop.last_frame_dt, 1 / rv.fps)
     pad = 12
     right = w - pad
     left = pad
     top = pad
     bottom = h - pad
     playback_color = (255, 255, 255)
-    if renderer.request_pause:
+    if renderer.is_paused():
         playback_color = (0, 255, 255)
 
     # BASE
     # ----------------------------------------
+    update_surface()
+
     surface.fill((0, 0, 0))
 
     changed = renderer.invalidated or invalidated
-    if changed or f_displayed != f or renderer.is_rendering:
+    if changed or f_displayed != f or renderer.state == RendererState.RENDERING:
         im = None
         # New frame
         if sel_snapshot == -1:
@@ -143,12 +219,18 @@ def draw():
             im = hud.snaps[sel_snapshot][1]
 
         if im is not None and im.shape >= (1, 1, 1):
-            im = np.swapaxes(im, 0, 1)  # cv2 loads in h,w,c order, but pygame wants w,h,c
-            frame_surface = pygame.surfarray.make_surface(im)
-            renderer.invalidated = False
-            invalidated = False
-            f_displayed = f
-        elif not renderer.is_rendering:
+            try:
+                im = np.swapaxes(im, 0, 1)  # cv2 loads in h,w,c order, but pygame wants w,h,c
+                frame_surface = pygame.surfarray.make_surface(im)
+                renderer.invalidated = False
+                invalidated = False
+                f_displayed = f
+            except Exception as e:
+                print(e)
+                frame_surface = pygame.Surface((session.w, session.h))
+                frame_surface.fill((255, 0, 255))
+                pass
+        elif not renderer.state != RendererState.RENDERING:
             im = np.zeros((session.w, session.h, 3), dtype=np.uint8)
             frame_surface = pygame.surfarray.make_surface(im)
 
@@ -159,7 +241,9 @@ def draw():
 
     # Paused / FPS
 
-    if not renderer.paused or (renderer.is_rendering and fps > 1):
+    if not renderer.is_paused() and fps > 1:
+        draw_text(f"{int(fps)} FPS", right, top, playback_color, origin=(1, 0))
+    elif renderer.state == RendererState.RENDERING:
         draw_text(f"{int(fps)} FPS", right, top, playback_color, origin=(1, 0))
     else:
         draw_text(f"Paused", right, top, playback_color, origin=(1, 0))
@@ -168,7 +252,7 @@ def draw():
     draw_text(f"{last_vram_reported} MB", right, top + ht, (255, 255, 255), origin=(1, 0))
 
     # Devmode
-    draw_text("Dev" if renderer.is_dev else "", right, top + ht * 2, (255, 255, 255), origin=(1, 0))
+    draw_text("Dev" if renderer.enable_dev else "", right, top + ht * 2, (255, 255, 255), origin=(1, 0))
 
     # Tracing
     draw_text("Trace" if jargs.args.trace else "", right, top + ht * 3, (255, 255, 255), origin=(1, 0))
@@ -177,36 +261,36 @@ def draw():
     # ----------------------------------------
     top2 = top + 6
     render_progressbar_y = 0
-    if renderer.is_rendering:
+    if renderer.state == RendererState.RENDERING:
         color = (255, 255, 255)
-        if renderer.request_render == 'toggle':
+        if renderer.render_repetition == RenderingRepetition.FOREVER:
             color = (255, 0, 255)
             draw_text("-- Rendering --", w2, top2, color, origin=(0.5, 0.5))
-        else:
+        elif renderer.render_repetition == RenderingRepetition.ONCE:
             draw_text("-- Busy --", w2, top2, color, origin=(0.5, 0.5))
 
-        draw_text(f"{renderer.n_rendered} frames", w2, top2 + ht, color, origin=(0.5, 0.5))
-        draw_text(f"{renderer.n_rendered / rv.fps:.02f}s", w2, top2 + ht + ht, color, origin=(0.5, 0.5))
+        draw_text(f"{renderer.loop.n_rendered} frames", w2, top2 + ht, color, origin=(0.5, 0.5))
+        draw_text(f"{renderer.loop.n_rendered / rv.fps:.02f}s", w2, top2 + ht + ht, color, origin=(0.5, 0.5))
 
         render_progressbar_y = top2 + ht + ht
 
-    draw_text(renderer.script_name, left, bottom - ht * 2, col=(0, 255, 0))
-    draw_text(f"{session.w}x{session.h}", left, top + ht * 0)
-    draw_text(f"{rv.fps} fps", left, top + ht * 1)
     if f <= f_last:
-        draw_text(f"{f} / {f_last}", left, top + ht * 2, playback_color)
+        draw_text(f"{f} / {f_last}", left, top, playback_color)
     else:
-        draw_text(f"{f}", left, top + ht * 2, playback_color)
+        draw_text(f"{f}", left, top, playback_color)
 
     total_seconds = f / rv.fps
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
-    draw_text(f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}", left, top + ht * 3, playback_color)
+    draw_text(f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}", left, top + ht * 1, playback_color)
     base_ul_offset = 5
 
     # LOWER LEFT
     # ----------------------------------------
     draw_text(session.name, left, bottom - ht * 1)
+    draw_text(f"{session.w}x{session.h}", left, bottom - ht * 2)
+    draw_text(f"{rv.fps} fps", left, bottom - ht * 3)
+    # draw_text(renderer.script_name, left, bottom - ht * 2, col=(0, 255, 0))
 
     # LOWER RIGHT
     # ----------------------------------------
@@ -259,7 +343,7 @@ def draw():
         progress = f / f_last
 
         pygame.draw.rect(surface, (0, 0, 0), (0, 0, w, playback_thickness))
-        pygame.draw.rect(surface, (255, 255, 255) if not renderer.request_pause else (0, 255, 255), (0, 0, w * progress, playback_thickness))
+        pygame.draw.rect(surface, (255, 255, 255) if not renderer.mode == RenderMode.PAUSE else (0, 255, 255), (0, 0, w * progress, playback_thickness))
 
         # Draw ticks
         major_ticks = 60 * rv.fps
@@ -283,7 +367,7 @@ def draw():
             pygame.draw.line(surface, color, (int(x) + 1, y), (int(x) + 1, y + height))
             x += minor_ticks * ppf
 
-    if renderer.is_rendering:
+    if renderer.state == RendererState.RENDERING:
         # lagindicator = np.random.randint(0, 255, (8, 8), dtype=np.uint8)
 
         lagindicator = random_noise(np.zeros((8, 8)), 's&p', amount=0.1)
@@ -292,12 +376,15 @@ def draw():
         lagindicator_pil = Image.fromarray(lagindicator)
         lagindicator_surface = pygame.image.frombuffer(lagindicator_pil.tobytes(), lagindicator_pil.size, 'RGB')
         surface.blit(lagindicator_surface, (w - 8 - 2, h - 8 - 2))
+
     ht = font.size("a")[1]
 
+    # DRAW HUD
+    # ----------------------------------------
     if enable_hud:
         x = pad
         y = ht * base_ul_offset
-        dhud = session.get_frame_data('hud', True)
+        dhud = session.get_frame_data('hud', rv.f, clamp=True)
         if dhud:
             for i, row in enumerate(dhud):
                 value = row[0]
@@ -316,6 +403,55 @@ def draw():
                     draw_text(frag, x, y, color)
                     y += ht
 
+        # Draw signal bars
+        s_bar_x = left
+        s_bar_height = 32
+        s_bar_width = 6
+        s_bar_spacing = 8
+        s_border_width = 2
+        for s in hud.draw_signals:
+            s_name = s.name
+            s_min = s.min
+            s_max = s.max
+            s_values = rv.signals.get(s_name)
+            if s.valid:
+                v = s_values[rv.f]
+                v_norm = (v - s_min) / (s_max - s_min)
+                is_11 = s_min < 0
+                if not is_11:
+                    bar_h = s_bar_height * v_norm
+                    bar_w = s_bar_width
+                    bar_x = s_bar_x
+                    bar_y = bottom - ht * 4 - s_bar_height
+                    pygame.draw.rect(surface, (0, 0, 0), (bar_x - s_border_width,
+                                                          bar_y - s_bar_height - s_border_width,
+                                                          bar_w + s_border_width * 2,
+                                                          s_bar_height + s_border_width * 2))
+                    pygame.draw.rect(surface, (255, 255, 255), (bar_x, bar_y - bar_h, bar_w, bar_h))
+                else:
+                    vnorm_11 = (v_norm - 0.5) * 2
+                    bar_x = s_bar_x
+                    bar_w = s_bar_width
+                    bar_h = s_bar_height * abs(vnorm_11)
+                    bar_y_center = bottom - ht * 4 - s_bar_height
+                    bar_y = bar_y_center
+
+                    if vnorm_11 > 0:
+                        bar_y -= s_bar_height * vnorm_11
+
+                    pygame.draw.rect(surface, (0, 0, 0), (bar_x - s_border_width,
+                                                          bar_y_center - s_bar_height - s_border_width,
+                                                          bar_w + s_border_width * 2,
+                                                          s_bar_height * 2 + s_border_width * 2))
+                    pygame.draw.rect(surface, (255, 255, 255), (bar_x, bar_y, bar_w, bar_h))
+                    # Draw black tick line at halfway point
+                    pygame.draw.rect(surface, (0, 0, 0), (bar_x, bar_y_center - 1, bar_w, 2))
+
+                s_bar_x += s_bar_width
+                s_bar_x += s_bar_spacing
+
+        # draw_text(f"{rv.fps} fps", left, bottom - ht * 3)
+
     if key_mode == 'action':
         action_slice = discovered_actions[sel_action_page:sel_action_page + 9]
         x = pad
@@ -325,8 +461,6 @@ def draw():
             color = (255, 255, 255)
             draw_text(f'({i + 1}) {name}', x, y, color)
             y += ht
-
-    f_update += 1
 
 
 def keydown(key, ctrl, shift, alt):
@@ -401,86 +535,81 @@ def keydown_main(key, ctrl, shift, alt):
     f_first = session.f_first
     f = session.f
 
-    if key == qkeys.Key_F1:
+    if key == uiconf.key_toggle_ryusig:
         ryusig.toggle()
-    if key == qkeys.Key_F2:
-        renderer.is_dev = not renderer.is_dev
-    if key == qkeys.Key_F3:
+    elif key == qkeys.Key_F2:
+        renderer.enable_dev = not renderer.enable_dev
+    elif key == qkeys.Key_F3:
         args.trace = not args.trace
 
-    if key == qkeys.Key_R and shift:
+    elif key == qkeys.Key_R and shift:
         s = Session(renderer.session.dirpath)
         s.f = renderer.session.f
         s.load_f()
-        s.load_file()
+        s.load_frame()
 
         renderer.set_session(s)
 
     # Playback
     # ----------------------------------------
-    if key == uiconf.key_pause: renderer.pause()
-    if key == uiconf.key_seek_prev: renderer.seek(f - 1)
-    if key == uiconf.key_seek_next: renderer.seek(f + 1)
-    if key == uiconf.key_seek_prev_second: renderer.seek(f - rv.fps)
-    if key == uiconf.key_seek_next_second: renderer.seek(f + rv.fps)
-    if key == uiconf.key_seek_prev_percent: renderer.seek(f - int(f_last * uiconf.hobo_seek_percent))
-    if key == uiconf.key_seek_next_percent: renderer.seek(f + int(f_last * uiconf.hobo_seek_percent))
-    if key == uiconf.key_seek_first: renderer.seek(f_first)
-    if key == uiconf.key_seek_first_2: renderer.seek(f_first)
-    if key == uiconf.key_seek_first_3: renderer.seek(f_first)
-    if key == uiconf.key_seek_last or key == uiconf.key_seek_last_2:
-        renderer.seek(f_last)
-        renderer.seek(f_last + 1)
+    elif key == uiconf.key_pause:
+        if renderer.mode == RenderMode.PAUSE and session.f >= session.f_last:
+            audio.desired_name = None
+            renderer.seek(renderer.play.last_play_start_frame)
+            renderer.set_play()
+        else:
+            renderer.toggle_pause()
+    elif key == uiconf.key_cancel and renderer.mode != RenderMode.PAUSE:
+        renderer.seek(renderer.play.last_play_start_frame)
+        renderer.set_pause()
+    elif handle_seek(key):
+        pass
 
     # Editing
     # ----------------------------------------
-    if key == uiconf.key_fps_down:
+    elif key == uiconf.key_fps_down:
         rv.fps = get_fps_stop(rv.fps, -1)
         ryusig.refresh()
-    if key == uiconf.key_fps_up:
+    elif key == uiconf.key_fps_up:
         rv.fps = get_fps_stop(rv.fps, 1)
         ryusig.refresh()
-    if key == uiconf.key_select_segment_prev and len(get_segments()):
+    elif key == uiconf.key_select_segment_prev and len(get_segments()):
         current_segment = max(0, current_segment - 1)
         renderer.seek(get_segments()[current_segment][0])
-    if key == uiconf.key_copy_frame:
+    elif key == uiconf.key_copy_frame:
         copied_frame = session.img
-    if key == uiconf.key_paste_frame:
+    elif key == uiconf.key_paste_frame:
         if copied_frame is not None:
             session.img = copied_frame
             session.save()
             session.save_data()
             renderer.invalidated = True
-    if key == uiconf.key_delete and shift:
+    elif key == uiconf.key_delete and shift:
         if session.delete_f():
             renderer.invalidated = True
 
     # Rendering
     # ----------------------------------------
-    if key == uiconf.key_render:
-        if renderer.is_rendering and renderer.request_render:
-            renderer.request_render = False
-        elif renderer.is_rendering and not renderer.request_render:
-            renderer.render('toggle')
-        else:
-            renderer.render('now')
-    if key == uiconf.key_reload_script:
+    elif key == uiconf.key_render:
+        renderer.toggle_render(RenderingRepetition.FOREVER if shift else RenderingRepetition.ONCE)
+
+    elif key == uiconf.key_reload_script:
         renderer.reload_script()
-    if key == uiconf.key_toggle_hud:
+    elif key == uiconf.key_toggle_hud:
         enable_hud = not enable_hud
-    if key == uiconf.key_set_segment_start:
+    elif key == uiconf.key_set_segment_start:
         if len(get_segments()) and not f > get_segments()[current_segment][1]:
             get_segments()[current_segment] = (f, get_segments()[current_segment][1])
             session.save_data()
         else:
             create_segment(50)
-    if key == uiconf.key_set_segment_end:
+    elif key == uiconf.key_set_segment_end:
         if len(get_segments()) and not f < get_segments()[current_segment][0]:
             get_segments()[current_segment] = (get_segments()[current_segment][0], f)
             session.save_data()
         else:
             create_segment(-50)
-    if key == uiconf.key_seek_prev_segment:
+    elif key == uiconf.key_seek_prev_segment:
         indices = [i for s in get_segments() for i in s]
         indices.sort()
         # Find next value in indices that is less than session.f
@@ -488,7 +617,7 @@ def keydown_main(key, ctrl, shift, alt):
             if indices[i] < f:
                 renderer.seek(indices[i])
                 break
-    if key == uiconf.key_seek_next_segment:
+    elif key == uiconf.key_seek_next_segment:
         indices = [i for s in get_segments() for i in s]
         indices.sort()
         # Find next value in indices that is greater than session.f
@@ -496,29 +625,67 @@ def keydown_main(key, ctrl, shift, alt):
             if indices[i] > f:
                 renderer.seek(indices[i])
                 break
-    if key == uiconf.key_select_segment_next and len(get_segments()):
+    elif key == uiconf.key_select_segment_next and len(get_segments()):
         current_segment = min(len(get_segments()) - 1, current_segment + 1)
         renderer.seek(get_segments()[current_segment][0])
-    if key == uiconf.key_play_segment:
+    elif key == uiconf.key_play_segment:
+        if current_segment < len(get_segments()):
+            return
+
         lo, hi = get_segments()[current_segment]
         session.seek(lo)
         renderer.play_until = hi
         renderer.request_pause = False
         renderer.looping = True
         renderer.looping_start = lo
-    if key == uiconf.key_toggle_action_mode:
+    elif key == uiconf.key_toggle_action_mode:
         key_mode = 'action'
+    elif key == qkeys.Key_Escape:
+        ryusig.toggle()
 
+    # DBG
+    # ----------------------------------------
+    from src.rendering import dbg
+    dbg_increment_offset = 0
+    if ctrl: dbg_increment_offset = 1
+    if shift: dbg_increment_offset = 2
+
+    if key == uiconf.key_dbg_up:
+        dbg.up(dbg_increment_offset)
+    elif key == uiconf.key_dbg_down:
+        dbg.down(dbg_increment_offset)
+    elif key == uiconf.key_dbg_cycle_increment:
+        dbg.cycle_increment()
+    elif key == qkeys.Key_1:
+        dbg.select(0)
+    elif key == qkeys.Key_2:
+        dbg.select(1)
+    elif key == qkeys.Key_3:
+        dbg.select(2)
+    elif key == qkeys.Key_4:
+        dbg.select(3)
+    elif key == qkeys.Key_5:
+        dbg.select(4)
+    elif key == qkeys.Key_6:
+        dbg.select(5)
+    elif key == qkeys.Key_7:
+        dbg.select(6)
+    elif key == qkeys.Key_8:
+        dbg.select(7)
+    elif key == qkeys.Key_9:
+        dbg.select(8)
+    elif key == qkeys.Key_0:
+        dbg.select(9)
 
 def focuslose():
     renderer.detect_script_every = 1
 
 
 def focusgain():
-    renderer.request_script_check = True
+    renderer.requests.script_check = True
     renderer.detect_script_every = -1
 
-    if renderer.is_readonly:
+    if renderer.enable_readonly:
         refresh_session()
 
 
@@ -619,3 +786,46 @@ def refresh_session():
         renderer.session.f = tmp_f
         if was_last:
             ses.seek(ses.f_last)
+
+def handle_seek(key):
+    session = renderer.session
+    f_last = session.f_last
+    f_first = session.f_first
+    f = session.f
+
+    if key == uiconf.key_seek_prev:
+        seek(f - 1)
+        return True
+    if key == uiconf.key_seek_next:
+        seek(f + 1)
+        return True
+    if key == uiconf.key_seek_prev_second:
+        seek(f - rv.fps)
+        return True
+    if key == uiconf.key_seek_next_second:
+        seek(f + rv.fps)
+        return True
+    if key == uiconf.key_seek_prev_percent:
+        seek(f - int(f_last * uiconf.hobo_seek_percent))
+        return True
+    if key == uiconf.key_seek_next_percent:
+        seek(f + int(f_last * uiconf.hobo_seek_percent))
+        return True
+    if key == uiconf.key_seek_first:
+        seek(f_first)
+        return True
+    if key == uiconf.key_seek_first_2:
+        seek(f_first)
+        return True
+    if key == uiconf.key_seek_first_3:
+        seek(f_first)
+        return True
+    if key == uiconf.key_seek_last or key == uiconf.key_seek_last_2:
+        seek(f_last)
+        seek(f_last + 1)
+        return True
+    return False
+
+def seek(frame):
+    renderer.seek(frame)
+    ryusig.on_hobo_seek(frame)

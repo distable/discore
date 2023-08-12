@@ -1,13 +1,13 @@
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import QMainWindow
 
-from rendering.ImageWidget import ImageWidget
+from src.rendering.SurfaceWidget import SurfaceWidget
 from src.gui.QtUtils import get_keypress_args
 
 class HoboWindow(QMainWindow):
     def __init__(self, surf, parent=None):
         super(HoboWindow, self).__init__(parent)
-        self.setCentralWidget(ImageWidget(surf))
+        self.setCentralWidget(SurfaceWidget(surf))
 
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.on_timer_timeout)
@@ -22,11 +22,15 @@ class HoboWindow(QMainWindow):
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
         self.setAcceptDrops(True)
 
+    def set_surface(self, surf):
+        self.centralWidget().surface = surf
+
+
     def on_timer_timeout(self):
         for hnd in self.timeout_handlers:
             hnd()
         self.update()
-        self.centralWidget().repaint()
+        # self.centralWidget().repaint()
 
 
     def keyPressEvent(self, event):

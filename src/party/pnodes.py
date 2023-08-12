@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from pathlib import Path
 from random import shuffle
 from typing import List
 
@@ -7,16 +8,9 @@ from typing_extensions import override
 from src.renderer import rv
 from .maths import *
 from .maths import choose
-
-RESOLUTION = 3
-
-if not 'google.colab' in sys.modules:
-    pass
-    # from core.maths import *
-    # from core.util import *
-    # from pytti.Perceptor.Prompt import parse_prompt, mask_image
-
-# Config ----------------------------------------
+from ..classes import paths
+from ..classes.paths import parse_time_to_seconds
+from ..lib.printlib import trace_decorator
 
 # Vis ----------------------------------------
 vis_font = r"/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
@@ -26,17 +20,16 @@ vis_display_min_significance = 0.115
 
 font = None
 
-
 # Baked Data ----------------------------------------
 
 class Keyframe:
     def __init__(self):
-        self.time = 0
+        self.f = 0
         self.w = 0
 
 
 class PNode:
-    def __init__(self, text_or_children=None, wt=None, mask=None, scale: float = 1.0, add: float = 0.0, prefix: str = '', suffix: str = '', join_char: str = '', join_num: int = 999,):
+    def __init__(self, text_or_children=None, wt=None, mask=None, scale: float = 1.0, add: float = 0.0, prefix: str = '', suffix: str = '', join_char: str = '', join_num: int = 999, ):
         # def __init__(self, children,  **kwargs):
         self.parent = None
         self.children = []
@@ -71,6 +64,7 @@ class PNode:
         elif text_or_children is not None:
             self.add_children(text_or_children)
 
+    @trace_decorator
     def eval_text(self, t):
         if len(self.children) == 0:
             return self.text
@@ -95,7 +89,7 @@ class PNode:
                     s += sorted_children[i].eval_text(t)
                     s += c
 
-                if c: # It would be very bad if we did it with len(c) == 0
+                if c:  # It would be very bad if we did it with len(c) == 0
                     s = s[:-len(c)]
                 return s
 
@@ -115,6 +109,11 @@ class PNode:
 
     def transform(self, wcconfs, globals):
         # Promote
+        # Wrap string children in PList
+        for i in range(len(self.children)):
+            if isinstance(self.children[i], str):
+                self.children[i] = PList(self.children[i])
+
         if len(self.children) == 1 and self.children[0].can_promote():
             self.children = self.children[0].children
 
@@ -136,31 +135,43 @@ class PNode:
         def append_wc():
             nonlocal last_i
             s = text_or_children[last_i:i + 1]
-            if not s: return
-            parts = re.findall(wc_regex, s)[0]
-            wcname = parts[1]
-            wcconf = parts[3]
-            tiling = parts[5]
-            wc = globals.get(wcname)
-            conf = globals.get(wcconf) or wcconfs.get(wcname) or wcconfs.get('*')
-            if isinstance(conf, list):
-                conf = choose(conf)
-            if wc is None: raise Exception(f"Couldn't get set: {wcname}")
-            if conf is None:
-                conf = PCycle(interval=1)
-                # raise Exception(f"Couldn't get conf: {wcname}, {wcconf}")
+            if not s:
+                return
 
-            replacement_node = copy.copy(conf)
-            replacement_node.children = [copy.deepcopy(wc)]
-            replacement_node.join_num = 1
-            if tiling:
-                tile_char = tiling[-1]
-                tile_num = int(tiling[:-1])
-                replacement_node.join_char = tile_char
-                replacement_node.join_num = int(tile_num)
+            s = s[1:-1]
+            if paths.is_valid_url(s):
+                pass
 
-            children.append(replacement_node)
-            last_i = i + 1
+            if Path(s).exists() and paths.is_image(s):
+                pass
+            else:
+                parts = re.findall(wc_regex, s)[0]
+                wcname = parts[1]
+                wcconf = parts[3]
+                tiling = parts[5]
+                if ';' in wcname or ',' in wcname:
+                    wc = PList(wcname)
+                else:
+                    wc = globals.get(wcname)
+                conf = globals.get(wcconf) or wcconfs.get(wcname) or wcconfs.get('*')
+                if isinstance(conf, list):
+                    conf = choose(conf)
+                if wc is None: raise Exception(f"Couldn't get set: {wcname}")
+                if conf is None:
+                    conf = PCycle(interval=1)
+                    # raise Exception(f"Couldn't get conf: {wcname}, {wcconf}")
+
+                replacement_node = copy.copy(conf)
+                replacement_node.children = [copy.deepcopy(wc)]
+                replacement_node.join_num = 1
+                if tiling:
+                    tile_char = tiling[-1]
+                    tile_num = int(tiling[:-1])
+                    replacement_node.join_char = tile_char
+                    replacement_node.join_num = int(tile_num)
+
+                children.append(replacement_node)
+                last_i = i + 1
 
         def append_text():
             nonlocal last_i
@@ -202,15 +213,14 @@ class PNode:
     # def __str__(self):
     #     return self.text
 
-    def reset_bake(self):
+    def init_bake(self):
         self.timeline = None
         self.min = 0
         self.max = 0
         self.w = 0
         self.a = 0
         self.b = 0
-
-        self.timeline = []
+        self.timeline = rv.ones()
 
     def get_lossy_scale(self):
         scale = self.scale
@@ -236,23 +246,24 @@ class PNode:
 
         return parametric_eval(self.weight) * scale
 
+    @trace_decorator
     def get_bake_at(self, t):
         if self.timeline is None:
             raise RuntimeError(f"Cannot evaluate a PromptNode without timeline ({self.eval_text(t)})")
 
-        res = RESOLUTION
         seconds = rv.duration
 
+        # TODO interpolation is no longer necessary
         # Interpolate smoothly between keyframes
-        idx = int(t * res)
-        idx = clamp(idx, 0, seconds * res)
+        idx = int(t * rv.fps)
+        idx = clamp(idx, 0, seconds * rv.fps)
         idx = int(idx)
 
         last = self.timeline[idx]
         next = self.timeline[idx + 1]
 
-        frameStart = idx / res
-        interframe = (t - frameStart) / (1 / res)
+        frameStart = idx / rv.fps
+        interframe = (t - frameStart) / (1 / rv.fps)
 
         return lerp(last, next, interframe)
 
@@ -316,6 +327,7 @@ class PNode:
         else:
             raise RuntimeError(f"PromptNode.add_children: Invalid input children nodes type {type(add)}")
 
+    @trace_decorator
     def bake(self):
         for n in self.children:
             n.bake()
@@ -355,7 +367,7 @@ class PList(PNode):
                 phrases = [f'1.0 {prefix}{phrase.strip()}{suffix}' for phrase in phrases]
 
             s = '\n'.join(phrases)
-            nodes,max = parse_promptlines(s)
+            nodes, max = parse_promptlines(s)
         elif isinstance(phrases, PNode):
             nodes = phrases
 
@@ -370,6 +382,7 @@ class PCycle(PList):
     """
     A node which evals to a single child node, based on the time interval (cycling)
     """
+
     def __init__(self, children=None, interval: float = 1, **kwargs):
         super(PCycle, self).__init__(children, **kwargs)
         self.interval = interval
@@ -379,17 +392,6 @@ class PCycle(PList):
         return self.children[loop % len(self.children)].eval_text(t)
 
 
-
-def parse_time_to_seconds(time_str):
-    # Parse time string to datetime object
-    time_obj = datetime.strptime(time_str, '%H:%M:%S.%f')
-    # Convert datetime object to timedelta object
-    time_delta = timedelta(hours=time_obj.hour,
-                           minutes=time_obj.minute,
-                           seconds=time_obj.second,
-                           microseconds=time_obj.microsecond)
-    # Return total seconds
-    return time_delta.total_seconds()
 
 
 class PTiming(PNode):
@@ -430,8 +432,11 @@ class PTiming(PNode):
         closest_node = None
         closest_time = 999
 
+        # print(f"PTiming.eval_text: t={t}")
+
         for node in self.children:
             node_t = self.times[node]
+            # print(f"PTiming.eval_text: {node_t}, {node.eval_text(t)}, {closest_time}, {closest_time}")
             if abs(node_t - t) < closest_time and node_t <= t:
                 closest_node = node
                 closest_time = abs(node_t - t)
@@ -481,15 +486,15 @@ class PProp(PList):
     def get_debug_string(self,
                          t_length=10,
                          t_timestep=0.5):
-        return f"PSet(children={len(self.children)})"
+        return f"PProp(children={len(self.children)})"
 
     @override
+    @trace_decorator
     def bake(self):
         super().bake()
-        totalSteps = rv.duration * RESOLUTION
 
         for child in self.children:
-            child.reset_bake()
+            child.init_bake()
 
         # CREATE THE KEYFRAMES BY STATE -------------------------------------------
         states: List[List[Keyframe]] = []
@@ -501,14 +506,16 @@ class PProp(PList):
             shuffled_children.append(node)
 
         time = 0
-        while time < totalSteps:
-            period = int(val_or_range(self.period) * RESOLUTION)
-            time += period
+        while time < rv.n:
+            period_f = int(val_or_range(self.period) * rv.fps)
+            period_f = max(period_f, 1)
+
+            time += period_f
 
             shuffle(shuffled_children)
 
             keyframes: List[Keyframe] = [None] * len(shuffled_children)
-            w = 1
+            ws = 1
             p = val_or_range(self.proportion)
 
             if p >= 1:
@@ -516,10 +523,12 @@ class PProp(PList):
 
             for node in shuffled_children:
                 keyframe = Keyframe()
-                keyframe.w = w  # jcurve(w, 0.85)  # TODO make this not hardcoded
-                keyframe.time = time + int(val_or_range(self.drift) * period)
+                keyframe.w = ws  # jcurve(w, 0.85)  # TODO make this not hardcoded
+                keyframe.f = time + int(val_or_range(self.drift) * period_f)
 
-                w *= p
+                keyframe.f = min(keyframe.f, rv.n - 1)
+
+                ws *= p
                 keyframes[node.iwav] = keyframe
 
             states.append(keyframes)
@@ -533,25 +542,25 @@ class PProp(PList):
                 timeline = node.timeline
 
                 if istate == lenStates - 1:
-                    while len(timeline) < totalSteps:
-                        timeline.append(node.w)
+                    # Last state, copy the last value for the rest of the timeline
+                    kf = states[istate][ipmt]
+                    timeline[kf.f:] = kf.w
                     break
 
                 kf0: Keyframe = states[istate][ipmt]
                 kf1: Keyframe = states[istate + 1][ipmt]
 
-                segment_duration = kf1.time - kf0.time
+                segment_duration = kf1.f - kf0.f
 
-                lmin = kf1.time - segment_duration * val_or_range(self.interpolation)  # Interpolation frames (100% interpolation otherwise with just np.time)
-                lmax = kf1.time
+                # Interpolation frames (100% interpolation otherwise with just np.time)
+                indices = np.arange(kf0.f, kf1.f, 1, dtype=int)
+                ts = ilerp(
+                        kf1.f - segment_duration * val_or_range(self.interpolation),
+                        kf1.f,
+                        indices)
+                ws = (self.curve or lerp)(kf0.w, kf1.w, ts)
 
-                for i in range(kf0.time, kf1.time):
-                    t = ilerp(lmin, lmax, i)
-
-                    curve = self.curve or lerp
-                    w = curve(kf0.w, kf1.w, t)
-
-                    timeline.append(w)
+                timeline[kf0.f:kf1.f] = ws
 
 
 class PSeq(PList):
@@ -574,14 +583,14 @@ class PSeq(PList):
         return f"PSeq(children={len(self.children)})"
 
     @override
+    @trace_decorator
     def bake(self):
         super().bake()
 
         # bake the timelines
-        totalSteps = rv.duration * RESOLUTION
 
         for child in self.children:
-            child.reset_bake()
+            child.init_bake()
 
         # CREATE THE KEYFRAMES BY STATE -------------------------------------------
 
@@ -589,7 +598,7 @@ class PSeq(PList):
         index = -1  # Current prompt index
         end = 0  # Current prompt end
 
-        for i in range(totalSteps):
+        for i in range(rv.n):
             # Advance the interpolations
             for j, node in enumerate(self.children):
                 if i == end and j == index:  # End of the current scene, tween out
@@ -611,7 +620,7 @@ class PSeq(PList):
 
             # Advance the scene, tween in
             if i == end:
-                period = int(val_or_range(self.width) * RESOLUTION)
+                period = int(val_or_range(self.width) * rv.fps)
 
                 index = (index + 1) % len(self.children)
                 end += period
@@ -628,159 +637,7 @@ class PCurves(PNode):
     pass
 
 
-# class PWords(PromptNode):
-#     def __init__(self, words, scale=1, add=0, prefix='', suffix=''):
-#         if ',' in words:
-#             words = words.split(',')
-#         elif ';' in words:
-#             words = words.split(';')
-#         else:
-#             words = words.split(' ')
-#
-#         words = [f'1.0 {prefix}{word.strip()}{suffix}' for word in words]
-#         s = '\n'.join(words)
-#
-#         super(PWords, self).__init__(s, scale=scale, add=add)
-#
-#
-#     def get_debug_string(self,
-#                          t_length=10,
-#                          t_timestep=0.5):
-#         return f"PWords(children={len(self.children)})"
-# region Visualization
-# scenes = PromptNode("""
-# 1 A lamborghini on the road leaving a trail of psychedelic fumes and smoke
-# 1 Huge megalithic rocks in the shape of human nose and ears
-# 1 A large tree next to a megalithic rock
-# """)
-#
-# backdrops = PromptNode("""
-# 1 A beautiful psychelic mural in the style of Van Gogh
-# 1 Beautiful snake textures 4k tiling texture
-# 1 Intricate bark texture from a tree in nature
-# """)
-#
-# root = GlobalSet(
-#   scenes = ProportionSet(scenes, 7.5, 0.5, [0.01, 0.25], 1),
-#   backdrops = ProportionSet(backdrops, 7.5, [0.95, 0.985], [0.01, 0.25], 1)
-#   eyes = ProportionSet(
-# )
-#
-# root.bake();
-# root.print(30, 2)
-
-# def print_scene(scene):
-#   for i in range(max_duration * resolution):
-#     values = map(lambda x: x.timeline[i], scene.prompts)
-#     parts = map(lambda x: f'{x: .2f}', values)
-#     str = ', '.join(parts)
-#
-#     vsum = 0
-#     sceneCount = len(scene.prompts)
-#     for j in range(sceneCount):
-#       vsum += scene.prompts[j].timeline[i]
-#
-#     print(f'{str} || {vsum / sceneCount:.2f}')
-
-
-# def run_vis():
-#   dirpath = get_image_dirpath()
-#   if not os.path.isdir(dirpath):  # Doesn't exist!
-#     print(f"Couldn't find '{dirpath}'")
-#     return
-#
-#   outputdir = f"{dirpath}visualization/"
-#   Path(outputdir).mkdir(parents=True, exist_ok=True)
-#
-#   print(f"vis dir: {dirpath}")
-#
-#   i = 1
-#   while True:
-#     # Get the image path for the index
-#     filepath = get_image_filepath(i)
-#
-#     if not os.path.isfile(filepath):  # Doesn't exist!
-#       print(f"vis step: ending ({filepath} not found)")
-#       break
-#
-#     # Draw the visualization onto the image
-#     with Image.open(filepath) as im:
-#       draw_vis(im, i)
-#       visimgpath = f"{outputdir}{i}.png"
-#       print(f"vis step: {visimgpath}")
-#       im.save(visimgpath)
-#
-#     i += 1
-#
-#
-# visframe = []
-#
-#
-# def draw_vis(im, i):
-#   global font
-#   if font is None:
-#     font = ImageFont.truetype(vis_font, vis_font_size)
-#
-#   # im = Image.new(mode="RGB", size=(800, 800), color="#fff")
-#   draw = ImageDraw.Draw(im)
-#   draw.fontmode = "1"
-#
-#   pos = (6, 6)
-#   pad = 4
-#   vistext = ""
-#
-#   # Collect entries for this frame
-#   for j in range(len(prompt_timelines) - 1):
-#     s = params.steps_per_frame * i
-#     t = s / (params.frames_per_second * params.steps_per_frame)
-#     idx = int(t * resolution)
-#
-#     t = prompt_strings[j]
-#     w = prompt_timelines[j][idx]
-#
-#     visframe.append(dict(t=t, w=w))
-#
-#   # Sort the entries in descending w
-#   visframe.sort(key=lambda x: x['w'], reverse=True)
-#   wmax = visframe[0]['w']
-#
-#   for entry in visframe[:vis_display_count]:
-#     t = entry['t']
-#     w = entry['w']
-#
-#     if w < wmax * vis_display_min_significance:
-#       break
-#
-#     tstr = str(t)
-#     limit = int(params.width / vis_font_size - 2)
-#
-#     wstr = f"{w:.2f}"
-#     vistext += f"{wstr.ljust(5)}{tstr[:limit] + '...' * (len(tstr) > limit)}\n"
-#
-#   draw.text((6, 6), vistext, "#ffff", font)
-#   size = draw.textsize(vistext, font)
-#   rect = (pos[0] - pad, pos[1] - pad, pos[0] + size[0] + pad, pos[1] + size[1] + pad)
-#   draw.rectangle(rect, fill="#00000044")
-#   draw.text(pos, vistext, "#cccccc", font)
-#
-#   visframe.clear()
-
-
-# def scene_slice(str, min, max):
-#   lines = str.splitlines()
-#   l = len(lines)
-#   a = int(l * min)
-#   b = int(l * max)
-
-#   s = '\n'.join(lines[a:b])
-#   return scene(s)
-
-# a1 = scene_slice(sa, 0.0, 0.5)
-# a2 = scene_slice(sa, 0.5, 1.0)
-# a3 = scene_slice(sa, 0.0, 1.0)
-
-# endregion
-
+@trace_decorator
 def bake(root):
     ret = []
 
@@ -840,13 +697,14 @@ def parse_promptlines(promptstr, prefix='', suffix=''):
 
 # bake_prompt(f"{scene} with black <a_penumbra> distance fog. Everything is ultra detailed, has 3D overlapping depth effect, into the center, painted with neon reflective/metallic/glowing ink, covered in <a_gem> <a_gem2> gemstone / <n_gem> ornaments, <a_light> light diffraction, (vibrant and colorful colors), {style}, painted with (acrylic)", settypes, setmap, locals())
 
-wc_regex = r'(\<(\w+)(:([\w|\d\/,]*))?(:([\w|\d\/,]+))?\>)'
+wc_regex = r'(([\w\d\s\-;%^&\./\\\'"]+)(:([\w|\d\/,]*))?(:([\w|\d\/,]+))?)'
 
 
 def print_prompts(root, min, max, step=1):
     for t in range(min, max, step):
         print(f"prompt(t={t}) ", eval_prompt(root, t))
 
+@trace_decorator
 def bake_prompt(prompt: str, wcconfs, globals):
     root = PNode(prompt)
     # root.print()
@@ -856,22 +714,25 @@ def bake_prompt(prompt: str, wcconfs, globals):
     for child in dfs(root):
         num += 1
     print(f"pnodes.bake_prompt: Baked {num} nodes")
-    # root.print()
+    root.print()
     # print("")
     # print_prompts(root, 1, 30)
 
     return root
 
 
+@trace_decorator
 def eval_prompt(root, t):
+    # print('eval_prompt', t)
     in_range = True
     for node in dfs(root):
         # print("DFS", node)
-        if node.timeline:
+        # print(node, node.timeline)
+        if node.timeline is not None:
             try:
                 # TODO there is a glitch in ProportionSet where the last values are zero for ALL children, so for now we will buffer a few seconds in advance to avoid this
                 # print("CHECK+5")
-                node.get_bake_at(t + 5)
+                node.get_bake_at(t)
             except:
                 # print("FAILED")
                 in_range = False
@@ -888,42 +749,3 @@ def eval_prompt(root, t):
         return eval_prompt(root, t)
 
     return root.eval_text(t)
-
-
-
-# root = PromptNode("Testing the <wildcard>")
-# wc = PromptPhrases("one;two;three")
-#
-# root.transform(dict(), {'wildcard': wc, '*': wc})
-# root.bake()
-# root.print()
-
-
-# region PyTTI
-
-
-# def to_pytti_object(self, tti):
-#     self.nprompt = parse_prompt(tti.embedder, self.to_pytti())
-#     self.nprompt.node = self
-#     if self.mask is not None:
-#         pilmask = gpil(self.mask)
-#         print(f"set_mask ({pilmask})")
-#         self.nprompt.set_mask(pilmask)
-#
-#     return self.nprompt
-#
-#
-# def update_pytti(self, t):
-#     if self.nprompt is not None:
-#         self.nprompt.text = self.eval_text()
-#         self.nprompt.weight = str(self.get_weight_at(t))
-#
-#
-# def to_pytti(self):
-#     if self.stop is None:
-#         return f"{self.eval_text()}:{self.weight}"
-#     else:
-#         return f"{self.eval_text()}:{self.weight}:{self.stop}"
-#
-
-# endregion

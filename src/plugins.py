@@ -12,13 +12,14 @@ from pathlib import Path
 
 from yachalk.ansi import Color, wrap_ansi_16
 
+import userconf
 from jargs import args
 from src.classes import paths
 from src.classes.logs import logplugin, logplugin_err
 from src.classes.paths import short_pid
 from src.classes.Plugin import Plugin
-from lib.printlib import print_bp, print
-from lib.printlib import trace
+from src.lib.printlib import print_bp, print
+from src.lib.printlib import trace
 from src import installer
 
 # STATE
@@ -44,6 +45,14 @@ def download_git_urls(urls: list[str], log=False):
                 logplugin(" -", url)
 
 
+plugfun_img = dict(_='plugfun', type='img')
+
+def plugfun_self(plugname):
+    return dict(_='plugfun', type='self', plugname=plugname)
+
+def plugfun_redirect(plugname, funcname):
+    return dict(_='plugfun', type='redirect', plugname=plugname, funcname=funcname)
+
 def plugfun(default_return=None):
     """
     Decorates the function to return a default value if the renderer is in dev mode.
@@ -58,13 +67,15 @@ def plugfun(default_return=None):
     def decorator(function):
         def wrapped_call(*kargs, **kwargs):
             from src import renderer
-            if renderer.is_dev:
+            if renderer.enable_dev:
                 def get_retval(v):
                     if isinstance(v, dict) and v.get('_') == 'plugfun':
                         if v['type'] == 'img':
                             return renderer.rv.img
                         elif v['type'] == 'self':
                             return get(v['plugname'])
+                        elif v['type'] == 'redirect':
+                            return getattr(get(v['plugname']), v['funcname']).__call__(*kargs, **kwargs)
                     return v
 
                 if isinstance(default_return, dict):
@@ -84,18 +95,13 @@ def plugfun(default_return=None):
 
     return decorator
 
-plugfun_img = dict(_='plugfun', type='img')
-
-def plugfun_self(plugname):
-    return dict(_='plugfun', type='self', plugname=plugname)
-
 def __call__(plugin):
     """
     Allows plugins.get_plug(query) like this plugins(query) instead
     """
     return get(plugin)
 
-def get(query, instantiate=True, loading=False):
+def get(query, instantiate=True, loading=True, installing=False):
     """
     Get a plugin instance by pid
     """
@@ -111,7 +117,7 @@ def get(query, instantiate=True, loading=False):
         if instantiate:
             for p in iter_plugins(paths.plugins):
                 if p.stem == query:
-                    plug = instantiate_plugin_at(p, loading)
+                    plug = instantiate_plugin_at(p, installing)
                     if loading:
                         load(plug)
                     return plug
@@ -119,7 +125,7 @@ def get(query, instantiate=True, loading=False):
     return None
 
 
-def instantiate_plugin_at(path: Path, with_install=True):
+def instantiate_plugin_at(path: Path, with_install=False):
     """
     Create the plugin, which is a python package/directory.
     Special files are expected:
@@ -130,7 +136,7 @@ def instantiate_plugin_at(path: Path, with_install=True):
     """
     import inspect
 
-    with_install = with_install or args.install
+    with_install = with_install or args.install or userconf.install
 
     if not path.exists():
         return
@@ -183,13 +189,12 @@ def instantiate_plugin_at(path: Path, with_install=True):
 
         # NOTE:
         # We allow any github repo to be used as a discore plugin, they don't necessarily need to implement plugjobs
-        # Hence we will now begin with real discore plugin instantiation
-        if any(['plugin' in Path(f).name.lower() for f in os.listdir(path)]):
+        if any([is_plugin_py(f, pid) for f in os.listdir(path)]):
             classtype = None
 
             with trace(f'src_plugins.{path.stem}.find'):
                 for f in path.iterdir():
-                    if f.is_file() and f.suffix == '.py' and 'Plugin' in f.stem:
+                    if is_plugin_py(f, pid):
                         with trace(f'src_plugins.{path.stem}.{f.stem}'):
                             mod = importlib.import_module(f'{paths.src_plugins_name}.{path.stem}.{f.stem}')
                             for name, member in inspect.getmembers(mod):
@@ -211,6 +216,9 @@ def instantiate_plugin_at(path: Path, with_install=True):
             plugin.logs().mkdir(parents=True, exist_ok=True)
 
             return plugin
+        else:
+            logplugin_err(f'No plugin class found in {path}')
+        # Hence we will now begin with real discore plugin instantiation
 
     except Exception as e:
         logplugin_err(f"Couldn't load plugin {path.name}:")
@@ -218,6 +226,12 @@ def instantiate_plugin_at(path: Path, with_install=True):
         excmsg = ''.join(traceback.format_exception(None, e, e.__traceback__))
         logplugin_err(excmsg)
         plugin_dirs.remove(path)
+def is_plugin_py(f, pid):
+    f = Path(f)
+    if f.suffix != '.py': return
+
+    return 'plugin' in f.name.lower() \
+        or f.with_suffix('').stem.lower() == pid
 
 
 def instantiate_plugins_by_pids(urls: list[str], install=True):

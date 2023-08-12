@@ -1,0 +1,16 @@
+{
+  version: 1,
+  mediaFileName: 'shpongle-divine-moment-of-truth.mp4',
+  cutSegments: [
+    {
+      start: 60.630728,
+      end: 76.224496,
+      name: '',
+    },
+    {
+      start: 85.478462,
+      end: 108.900849,
+      name: '',
+    },
+  ],
+}

@@ -1,27 +1,42 @@
-import argparse
+import os
 from glob import glob
 
 import numpy as np
 import torch
-from PIL import Image
-
-from src.classes import JobArgs
-from src.classes.Plugin import Plugin
-from conf import plugdef
-from lib import devices
-from lib.devices import device
-from plugins import plugjob
 import torch.nn.functional as F
+from PIL import Image
+from plug_repos.unimatch.unimatch.dataloader.depth import augmentation
+from plug_repos.unimatch.unimatch.unimatch.unimatch import UniMatch
+from plug_repos.unimatch.unimatch.utils.utils import InputPadder
 
-import os
-
-from unimatch.unimatch import UniMatch
-from dataloader.depth import augmentation
+from src.classes.convert import load_cv2, load_torch
+from src.classes.Plugin import Plugin
+from src.lib.devices import device
+from src.lib.printlib import trace_decorator
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
+DEPTH_CKPT_URL = 'https://s3.eu-central-1.amazonaws.com/avg-projects/unimatch/pretrained/gmdepth-scale1-regrefine1-resumeflowthings-demon-7c23f230.pth'
+# FLOW_CKPT_URL = 'https://s3.eu-central-1.amazonaws.com/avg-projects/unimatch/pretrained/gmflow-scale2-regrefine6-mixdata-train320x576-4e7b215d.pth'
+FLOW_CKPT_URL = 'https://s3.eu-central-1.amazonaws.com/avg-projects/unimatch/pretrained/gmflow-scale2-mixdata-train320x576-9ff1c094.pth'
+# FLOW_CKPT_URL = 'https://s3.eu-central-1.amazonaws.com/avg-projects/unimatch/pretrained/gmflow-scale1-mixdata-train320x576-4c3a6e9a.pth'
+FLOW_CKPT_UPSAMPLE = 4
+FLOW_CKPT_SCALE = 2
+FLOW_CKPT_ATTN_SPLITS_LIST = [4, 16]
+FLOW_CKPT_CORR_RADIUS_LIST = [-1, 4]
+FLOW_CKPT_PROP_RADIUS_LIST = [-1, 1]
+FLOW_CKPT_REG_REFINE = False
+FLOW_CKPT_REG_REFINE_NUM = 1
+FLOW_CKPT_PADDING_FACTOR = 8
+FLOW_CKPT_ATTN_TYPE = 'swin'
+
 class UnimatchPlugin(Plugin):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.depth_model = None
+        self.flow_model = None
+
     def title(self):
         return "unimatch"
 
@@ -37,14 +52,14 @@ class UnimatchPlugin(Plugin):
     def uninstall(self):
         pass
 
-    def load(self):
-        pass
+    # def load(self):
+    #     self.model = self.load_unimatch_model()
 
     def unload(self):
         pass
 
 
-    def load_unimatch_model(resume, strict_resume=False, feature_channels=128, num_scales=1, upsample_factor=8,
+    def load_unimatch_model(self, ckpt_path, strict_resume=False, feature_channels=128, num_scales=1, upsample_factor=4,
                             num_head=1, ffn_dim_expansion=4, num_transformer_layers=6, reg_refine=False, task='depth'):
         model = UniMatch(feature_channels=feature_channels,
                          num_scales=num_scales,
@@ -56,20 +71,22 @@ class UnimatchPlugin(Plugin):
                          task=task)
 
         loc = 'cuda' if torch.cuda.is_available() else 'cpu'
-        checkpoint = torch.load(resume, map_location=loc)
+
+        if not 'http' in ckpt_path:
+            checkpoint = torch.load(ckpt_path, map_location=loc)
+        else:
+            checkpoint = torch.hub.load_state_dict_from_url(ckpt_path, map_location=loc)
         model.load_state_dict(checkpoint['model'], strict=strict_resume)
 
         if torch.cuda.is_available():
             model.cuda()
 
+        torch.compile(model, mode='reduce-overhead', fullgraph=True)
+
         return model
 
-    @plugjob
-    def dummy(self, j:JobArgs):
-        pass
-
-
-    def get_depth(image, model, padding_factor=16, inference_size=None, attn_type='swin',
+    @trace_decorator
+    def get_depth(self, image, padding_factor=16, inference_size=None, attn_type='swin',
                   attn_splits_list=[2], prop_radius_list=[-1], num_depth_candidates=64, num_reg_refine=1,
                   min_depth=0.5, max_depth=10, depth_from_argmax=False, pred_bidir_depth=False, output_path='output'):
         # Apply data augmentation
@@ -83,7 +100,7 @@ class UnimatchPlugin(Plugin):
             img_ref = img_ref.cuda()
 
         # Estimate depth
-        results_dict = inference_depth(model,
+        results_dict = inference_depth(self.model,
                                        img_ref=img_ref,
                                        padding_factor=padding_factor,
                                        inference_size=inference_size,
@@ -99,6 +116,46 @@ class UnimatchPlugin(Plugin):
                                        output_path=output_path)
 
         print(results_dict)
+
+
+    @trace_decorator
+    def get_flow(self,
+                 image1,
+                 image2,
+                 inference_size=None):
+        image1 = load_torch(image1).cuda()
+        image2 = load_torch(image2).cuda()
+
+        if inference_size is not None:
+            assert isinstance(inference_size, list) or isinstance(inference_size, tuple)
+            ori_size = image1.shape[-2:]
+            image1 = F.interpolate(image1, size=inference_size, mode='bilinear', align_corners=True)
+            image2 = F.interpolate(image2, size=inference_size, mode='bilinear', align_corners=True)
+        else:
+            padder = InputPadder(image1.shape, padding_factor=FLOW_CKPT_PADDING_FACTOR)
+            image1, image2 = padder.pad(image1, image2)
+
+        if self.flow_model is None:
+            self.flow_model = self.load_unimatch_model(FLOW_CKPT_URL,
+                                                       num_scales=FLOW_CKPT_SCALE,
+                                                       upsample_factor=FLOW_CKPT_UPSAMPLE,
+                                                       reg_refine=FLOW_CKPT_REG_REFINE,
+                                                       task='flow')
+
+        print("Unimatch.get_flow: inference...")
+
+        # image1.half()
+        # image2.half()
+        results_dict = self.flow_model(image1, image2,
+                                       attn_type=FLOW_CKPT_ATTN_TYPE,
+                                       attn_splits_list=FLOW_CKPT_ATTN_SPLITS_LIST,
+                                       corr_radius_list=FLOW_CKPT_CORR_RADIUS_LIST,
+                                       prop_radius_list=FLOW_CKPT_PROP_RADIUS_LIST,
+                                       num_reg_refine=FLOW_CKPT_REG_REFINE_NUM,
+                                       padding_factor=FLOW_CKPT_PADDING_FACTOR,
+                                       task='flow')
+
+        return results_dict['flow_preds'][-1].detach().cpu().numpy().squeeze().transpose(1, 2, 0)
 
 @torch.no_grad()
 def inference_depth(model,
@@ -156,10 +213,10 @@ def inference_depth(model,
         # relative pose
         pose = np.linalg.inv(pose_tgt) @ pose_ref
 
-        sample = {'img_ref': img_ref,
-                  'img_tgt': img_tgt,
+        sample = {'img_ref'   : img_ref,
+                  'img_tgt'   : img_tgt,
                   'intrinsics': intrinsics,
-                  'pose': pose,
+                  'pose'      : pose,
                   }
         sample = val_transform(sample)
 

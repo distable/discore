@@ -4,6 +4,7 @@ from PyQt6 import QtCore
 qkey = QtCore.Qt.Key
 
 key_pause = qkey.Key_Space
+key_cancel = qkey.Key_Escape
 key_reload_script = qkey.Key_R
 
 key_seek_prev = qkey.Key_Left
@@ -34,3 +35,10 @@ key_set_segment_end = qkey.Key_O
 key_seek_prev_segment = qkey.Key_Comma
 key_seek_next_segment = qkey.Key_Period
 key_play_segment = qkey.Key_P
+
+key_toggle_ryusig = qkey.Key_Tab
+
+key_dbg_up = qkey.Key_Equal
+key_dbg_down = qkey.Key_Minus
+key_dbg_cycle_increment = qkey.Key_Backslash
+

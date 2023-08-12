@@ -1,23 +1,22 @@
+
 torch==2.0.0
-accelerate
 torchvision==0.15.1
 torchaudio==2.0.1
-diffusers==0.15.1
+diffusers==0.17.1
+safetensors==0.3.1
 compel
 # fairscale
 # fonts
 # font-roboto
 numpy==1.23.5
-numba==0.56.4
+numba==0.57.0
 cupy-wheel==12.0.0
 omegaconf==2.3.0
-piexif~=1.1.3
 Pillow==9.5.0
 pytorch_lightning
 scikit-image~=0.19.3
 timm~=0.6.12
 einops~=0.3.2
-jsonmerge
 clean-fid
 resize-right
 torchdiffeq
@@ -42,7 +41,8 @@ requests~=2.25.1
 # lpips
 gdown
 # facexlib
-opencv-python==4.7.0.72
+# opencv-python==4.7.0.72
+opencv-contrib-python
 py-jsonic
 beeprint
 art
@@ -52,7 +52,6 @@ websocket-client
 python-socketio
 transformers==4.27.4
 # fire
-pydub
 # stumpy
 python-dateutil~=2.8.2
 opensimplex~=0.4.3
@@ -82,7 +81,7 @@ cryptography~=38.0.4
 Jinja2~=3.1.2
 packaging~=21.3
 pyparsing~=3.0.9
-zipp~=3.11.0
+# zipp~=3.11.0
 Cython~=0.29.33
 future~=0.18.2
 mido~=1.2.10
@@ -90,7 +89,7 @@ mido~=1.2.10
 librosa
 resampy
 tomesd
-git+https://github.com/facebookresearch/segment-anything.git
+# git+https://github.com/facebookresearch/segment-anything.git
 controlnet-aux==0.0.2
 # git+https://github.com/isl-org/MiDaS.git
 cupy-cuda11x

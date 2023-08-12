@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+
 import importlib
 import logging
 import os
@@ -7,11 +8,13 @@ import shutil
 import sys
 from pathlib import Path
 
+# print(' '.join(sys.argv[1:]))
+
 import jargs
 from jargs import argp, args, spaced_args
 
-sys.path.append(Path(__file__).parent.as_posix())
-sys.path.append((Path(__file__).parent / 'src').as_posix())
+# sys.path.append(Path(__file__).parent.as_posix())
+# sys.path.append((Path(__file__).parent / 'src').as_posix())
 
 logging.captureWarnings(True)
 logging.getLogger("py.warnings").setLevel(logging.ERROR)
@@ -29,9 +32,9 @@ if jargs.args.remote:
 # python_exec = sys.executable
 # print(python_exec)
 
-if not args.run:
-    # Disallow running as root
-    if os.geteuid() == 0:
+if not args.run and __name__ == '__main__':
+    # Disallow running as root on linux
+    if os.name == 'posix' and os.geteuid() == 0:
         print("You are warning as root, proceed at your own risks")
 
     # Check that we're running python 3.9 or higher
@@ -39,7 +42,9 @@ if not args.run:
         print(f"Warning your python version {sys.version_info} is detected as lower than 3.9, you may be fucked, proceed at your own risks")
 
     # Check that we have git installed
-    if not os.path.exists("/usr/bin/git"):
+    from src.lib import corelib
+    has_git = corelib.has_exe('git')
+    if not has_git:
         print("Please install git")
         exit(1)
 
@@ -53,7 +58,10 @@ if not args.run:
             argp.upgrade = True
 
         # Run bash shell with commands to activate the virtual environment and run the launch script
+        # if os.name == 'posix':
         os.system(f"bash -c 'source {VENV_DIR}/bin/activate'")
+        # elif os.name == 'nt':
+
 
     if args.upgrade:
         # Install requirements with venv pip
@@ -85,8 +93,8 @@ from src.classes import paths
 
 def install_core():
     """
-    Install all core requirements
-    """
+Install all core requirements
+"""
     from src.installer import check_import
     from src.installer import python
     from src.installer import pipargs
@@ -121,7 +129,7 @@ def on_ctrl_c():
     from src import renderer
 
     logdiscore("Exiting because of Ctrl+C.")
-    renderer.request_stop = True
+    renderer.requests.stop = True
     exit(0)
 
 
@@ -214,39 +222,11 @@ def plugin_wizard():
     input()
     exit(0)
 
-
-def print_possible_scripts():
-    from yachalk import chalk
-
-    for file in paths.get_script_paths():
-        # Load the file (which is python) and get the docstring at the top
-        # The docstring can span multipline lines
-        with open(file, "r") as f:
-            fulldocstring = ''
-            docstring = f.readline().strip()
-
-            if docstring.startswith('"""'):
-                if len(docstring) > 3 and docstring.endswith('"""'):
-                    fulldocstring = docstring[3:-3]
-                elif docstring == '"""':
-                    fulldocstring = f.readline().strip()
-                    if fulldocstring.endswith('"""'):
-                        fulldocstring = fulldocstring[:-3]
-
-
-        print(f"  {os.path.relpath(file, paths.scripts)[:-3]}  {chalk.dim(fulldocstring)}")
-
-
-def print_existing_sessions():
-    from src.classes.Session import Session
-    for file in paths.sessions.iterdir():
-        s = Session(file, log=False)
-        print(f"  {file.stem} ({str(s)})")
-
 def main():
     from src.classes.logs import logdiscore_err
     from src.classes.logs import logdiscore
     from yachalk import chalk
+    from src.lib.printlib import print_existing_sessions, print_possible_scripts
 
     if args.newplug:
         plugin_wizard()
@@ -279,6 +259,11 @@ def main():
         logdiscore(chalk.green(f"script: {sc}"))
 
         if a is not None:
+            if a == 'help':
+                print_possible_scripts()
+                exit(0)
+
+
             # Run an action script
             # ----------------------------------------
             # Get the path, check if it exists
@@ -311,7 +296,7 @@ def main():
             # ----------------------------------------
             # Dry run, only install and exit.
             if args.dry:
-                logdiscore("Exiting because of --dry argument")
+                logdiscore("Exiting because of -dry argument")
                 exit(0)
 
             # Start server
@@ -335,7 +320,8 @@ def main():
 #     installer.print_info()
 #     print()
 
-from src import core
-core.setup_annoying_logging()
+if __name__ == '__main__':
+    from src import core
+    core.setup_annoying_logging()
 
-main()
+    main()

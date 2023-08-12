@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import paramiko
@@ -46,6 +47,9 @@ class SFTPClient(paramiko.SFTPClient):
             rsync_excludes = []
         if rsync_includes is None:
             rsync_includes = []
+        # if source.is_file():
+        #     self.put_file(source, target)
+        #     return
 
         source = Path(source)
         target = Path(target)
@@ -65,7 +69,7 @@ class SFTPClient(paramiko.SFTPClient):
         created under target.
         """
         import yachalk as chalk
-        if Path(src).stem in  ["__pycache__", ".idea"]:
+        if Path(src).stem in ["__pycache__", ".idea"]:
             return
 
         self.mkdir(dst, ignore_existing=True)
@@ -105,6 +109,9 @@ class SFTPClient(paramiko.SFTPClient):
         """
         Uploads a file to the target path. The target path needs to include
         the target filename.
+        Args:
+            src: The path to the local file.
+            dst: The path to the remote file.
         """
         src = Path(src)
         dst = Path(dst)
@@ -113,19 +120,51 @@ class SFTPClient(paramiko.SFTPClient):
             self.put(src.as_posix(), dst.as_posix())
         else:
             # Check mtime to see if src is newer
-            stat = self.stat(dst.as_posix())
-            if src.stat().st_mtime > stat.st_mtime:
+            try:
+                stat = self.stat(dst.as_posix())
+                newer = int(src.stat().st_mtime) > int(stat.st_mtime)
+            except FileNotFoundError:
+                newer = True
+
+            if newer:
                 print(chalk.yellow(f"{src} -> {dst}"))
+                self.mkdir(dst.parent.as_posix(), ignore_existing=True)
                 self.put(src.as_posix(), dst.as_posix())
+            else:
+                print(chalk.dim(f"{src} -> {dst}"))
+
+    def get_file(self, src, dst):
+        """
+        Downloads a file from the target path. The target path needs to include
+        the target filename.
+
+        Args:
+            src: The source path on the remote host.
+            dst: The destination path on the local host.
+        """
+        src = Path(src)
+        dst = Path(dst)
+        if not self.ssh.file_exists(src):
+            print(chalk.red(f"{src} -> {dst}"))
+            self.get(src.as_posix(), dst.as_posix())
+        else:
+            # Check mtime to see if src is newer
+            try:
+                stat = self.stat(src.as_posix())
+                newer = int(dst.stat().st_mtime) < int(stat.st_mtime)
+            except FileNotFoundError:
+                newer = True
+
+            if newer:
+                print(chalk.yellow(f"{src} -> {dst}"))
+                self.mkdir(dst.parent.as_posix(), ignore_existing=True)
+                self.get(src.as_posix(), dst.as_posix())
             else:
                 print(chalk.dim(f"{src} -> {dst}"))
 
     def put_rsync(self, source, target, forbid_recursive, rsync_excludes, rsync_includes):
         source = Path(source)
         target = Path(target)
-
-        if source.is_file():
-            self.put_file(source, target)
 
         flags = ''
         if self.print_rsync:
@@ -144,12 +183,14 @@ class SFTPClient(paramiko.SFTPClient):
         source = source.as_posix()
         target = target.as_posix()
         if target[-1] != '/':
-            target += '/' # very important for rsync
+            target += '/'  # very important for rsync
 
-        cm = f"rsync -rlptgoDz{flags} -e 'ssh -p {self.port}' {source} root@{self.ip}:{target} {flags2}"
+        cm = f"rsync -rlptgoDz{flags} --exclude '*/.*' -e 'ssh -p {self.port}' {source} root@{self.ip}:{target} {flags2}"
         print_cmd(cm)
         # self.ssh.run(cm)
+        print(f'{source} -> {target}')
         os.system(cm)
+        # subprocess.run(cm, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
 
     def print_upload(self, item, source, target):
         print(f"Uploading {os.path.join(source, item)} to {target}")
@@ -159,6 +200,8 @@ class SFTPClient(paramiko.SFTPClient):
 
     def exists(self, path):
         try:
+            if isinstance(path, Path):
+                path = path.as_posix()
             # print(f'check if {path} exists', self.stat(path))
             if self.lstat(path) is not None:
                 return True
@@ -171,7 +214,7 @@ class SFTPClient(paramiko.SFTPClient):
         Augments mkdir by adding an option to not fail if the folder exists
         """
         try:
-            super(SFTPClient, self).mkdir(path, mode)
+            self.ssh.run('mkdir -p %s' % path)
         except IOError:
             if ignore_existing:
                 pass

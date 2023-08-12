@@ -1,11 +1,15 @@
 import cv2
 import numpy as np
 import torch
+from PIL import Image
 
-import installer
-from classes.convert import load_cv2
-from lib.devices import device
+from src import installer
+from src.classes import convert
+from src.classes.convert import load_cv2
+from src.lib.devices import device
 from plug_repos.flower.SD_CN_Animation.FloweR.model import FloweR
+from src.lib.printlib import trace_decorator
+from src.plugins import plugfun, plugfun_img
 from src.rendering.hud import hud, snap
 from src.classes.Plugin import Plugin
 from src_plugins.flower import flow_viz
@@ -68,12 +72,18 @@ class FlowerFlowPlugin(Plugin):
         self.clip_frames[-1] = img
 
 
-    def flow(self, img, strength):
-        img = load_cv2(img)
-        w = img.shape[1]
-        h = img.shape[0]
+    @plugfun(plugfun_img)
+    @trace_decorator
+    def flow(self, image, strength):
+        image = load_cv2(image)
+        w = image.shape[1]
+        h = image.shape[0]
+        ow = w
+        oh = h
+        w = w // 128 * 128
+        h = h // 128 * 128
 
-        if img is None:
+        if image is None:
             return
 
         hud(flower=strength)
@@ -83,7 +93,8 @@ class FlowerFlowPlugin(Plugin):
         color_shift = np.zeros((0, 3))
         color_scale = np.zeros((0, 3))
 
-        self.push(img)
+        im = cv2.resize(image, (w, h), interpolation=cv2.INTER_CUBIC)
+        self.push(im)
 
         clip_frames_torch = frames_norm(torch.from_numpy(self.clip_frames).to(device, dtype=torch.float32))
 
@@ -106,12 +117,17 @@ class FlowerFlowPlugin(Plugin):
         flow_map[:, :, 0] += np.arange(w)
         flow_map[:, :, 1] += np.arange(h)[:, np.newaxis]
 
-        warped_frame = cv2.remap(img, flow_map, None, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT_101)
+        flow_map = cv2.resize(flow_map, (image.shape[1], image.shape[0]), flow_map, interpolation=cv2.INTER_CUBIC)
+        new_xs = flow_map[:, :, 0]
+        new_ys = flow_map[:, :, 1]
+        new_xs = new_xs / (new_xs.max()) * (ow-1)
+        new_ys = new_ys / (new_ys.max()) * (oh-1)
+        warped_frame = cv2.remap(image, new_xs, new_ys, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT_101)
 
         # Flow image
         flow_img = flow_viz.flow_to_image(pred_flow)
-        frames_img = cv2.hconcat(list(self.clip_frames))
-        data_img = cv2.hconcat([flow_img, pred_occl, warped_frame])
+        # frames_img = cv2.hconcat(list(self.clip_frames))
+        # data_img = cv2.hconcat([flow_img, pred_occl, warped_frame])
 
         snap('flower_flow', flow_img)
         snap('flower_warped', warped_frame)

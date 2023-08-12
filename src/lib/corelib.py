@@ -4,7 +4,6 @@ from colorsys import hsv_to_rgb
 from pathlib import Path
 import time
 
-from src.lib.printlib import trace
 
 
 rgb_to_hex = lambda tuple: f"#{int(tuple[0] * 255):02x}{int(tuple[1] * 255):02x}{int(tuple[2] * 255):02x}"
@@ -38,10 +37,18 @@ def open_in_explorer(path):
 def shlexrun(cmd, print_cmd=True, shell=False, **kwargs):
     import shlex
     import subprocess
+
+    if isinstance(cmd, str):
+        cmd_str = cmd
+        cmd = shlex.split(cmd)
+    else:
+        cmd_str = ' '.join(cmd)
+
     if print_cmd:
         from yachalk import chalk
-        print(chalk.grey(f"> {cmd}"))
-    proc = subprocess.Popen(shlex.split(cmd), shell=shell, **kwargs)
+        print(chalk.grey(f"> {cmd_str}"))
+
+    proc = subprocess.Popen(cmd, shell=shell, **kwargs)
     proc.wait()
     return proc
 
@@ -79,7 +86,8 @@ def invoke_safe(func, *kargs, failsleep=0.0, unsafe=False, **kwargs):
             return True
 
         try:
-            with trace(f"safe_call({func.__name__ if hasattr(func, '__name__') else func.__class__.__name__})"):
+            from src.lib.printlib import trace
+            with trace(f"invoke_safe({func.__name__ if hasattr(func, '__name__') else func.__class__.__name__})"):
                 func(*kargs, **kwargs)
             return True
         except Exception as e:
@@ -89,3 +97,7 @@ def invoke_safe(func, *kargs, failsleep=0.0, unsafe=False, **kwargs):
             print(e)
             time.sleep(failsleep)
             return False
+
+def has_exe(name):
+    ret = subprocess.call(['git', '--version'])
+    return ret == 0

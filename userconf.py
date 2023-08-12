@@ -1,7 +1,9 @@
 
 import jargs
+from jargs import args
 
 share = False
+install = False
 
 # import torch
 # torch.set_float32_matmul_precision('high')
@@ -17,22 +19,30 @@ share = False
 
 default_width = 640
 default_height = 448
-if jargs.args.remote:
+if args.remote:
     default_width = 768
     default_height = 512
 
 # Core
 # ----------------------------------------
 
-precision = "full"
-print_timing = jargs.args.print
-print_trace = jargs.args.trace
-print_gputrace = jargs.args.print
-print_extended_init = jargs.args.print
-print_more2 = jargs.args.print
-print_frames = True # jargs.args.print
+precision = "half"
+print_timing = args.print
+print_trace = args.trace
+print_gputrace = args.print
+print_extended_init = args.print
+print_more2 = args.print
+
+gui_main_thread = True
+if args.remote:
+    gui_main_thread = False
 
 # ----------------------------------------
+
+init_paths = [
+    'sessions/.flows',
+    'sessions/.inits'
+]
 
 # sd1111.attention = 4
 # sd1111.bit8 = False
@@ -58,7 +68,7 @@ forbidden_dev_jobs = [
 
 # Deployment
 # ----------------------------------------
-vastai_default_search = "gpu_name=RTX_3090"
+vastai_default_search = "gpu_name=RTX_3090 inet_down>400"
 vastai_sshfs = True  # Mount via sshfs
 vastai_sshfs_path = "~/discore/mount/"
 

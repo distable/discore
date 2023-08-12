@@ -4,6 +4,12 @@ from pathlib import Path
 from typing import Callable
 from jsonic import deserialize, serialize, jsonic_serializer, jsonic_deserializer
 
+def first_non_null(*args):
+    for value in args:
+        if value is not None:
+            return value
+    return None
+
 def wserialize(obj):
     """
     Weird serialization

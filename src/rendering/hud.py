@@ -1,13 +1,45 @@
 from PIL import Image, ImageDraw, ImageFont
 from yachalk import chalk
 
-from lib.printlib import printkw
+from src.lib import printlib
+from src.lib.printlib import printkw
 from src.classes import paths
 from src.classes.convert import save_png
+from src import renderer
 
 snaps = []
 rows = []  # list[tuple[str, tuple[int, int, int]]]
 rows_tmp = []
+draw_signals = []
+enable_printing = True
+
+class DrawSignal:
+    def __init__(self, name):
+        self.name = name
+        self.min = 0
+        self.max = 0
+        self.valid = False
+
+def update_draw_signals():
+    """
+    Update the min and max of all signals
+    """
+    for s in draw_signals:
+        signal = renderer.rv.signals.get(s.name)
+        if signal is not None:
+            s.min = signal.min()
+            s.max = signal.max()
+            s.valid = True
+        else:
+            s.valid = False
+
+def set_draw_signals(*names):
+    """
+    Set the signals to draw
+    """
+    draw_signals.clear()
+    for name in names:
+        draw_signals.append(DrawSignal(name))
 
 def snap(name, img=None):
     if img is None:
@@ -19,23 +51,21 @@ def hud(*args, tcolor=(255, 255, 255), **kwargs):
     # Format numbers to 3 decimal places (if they are number)
     s = ''
     for a in args:
-        if isinstance(a, float):
-            s += f'{a:.1f} '
-        else:
-            s += f'{a} '
+        s += printlib.value_to_print_str(a)
+        s += ' '
 
     # TODO auto-snap if kwargs is ndarray hwc
 
     for k, v in kwargs.items():
-        if isinstance(v, float):
-            s += f'{k}={v:.2f} '
-        else:
-            s += f'{k}={v} '
+        s += f'{printlib.value_to_print_str(k)}='
+        s += printlib.value_to_print_str(v)
+        s += ' '
 
     maxlen = 80
     s = '\n'.join([s[i:i + maxlen] for i in range(0, len(s), maxlen)])
 
-    printkw(**kwargs, chalk=chalk.magenta)
+    if enable_printing:
+        printkw(**kwargs, chalk=chalk.magenta)
     rows.append((s, tcolor))
 
 

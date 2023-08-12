@@ -4,6 +4,16 @@ from typing import Tuple
 import psutil as psutil
 import torch
 
+import torch._dynamo.config
+
+# torch._dynamo.config.verbose = True
+# torch._dynamo.config.suppress_errors = True
+
+# from numba import config as numba_config
+
+# torch.set_num_threads(1)
+# torch.set_num_interop_threads(1)
+# numba_config.THREADING_LAYER = 'workqueue'
 
 # has_mps is only available in nightly pytorch (for now), `getattr` for compatibility
 def get_available_vram():
@@ -121,18 +131,6 @@ def set(_device=None, _precision='half', _precision_vae='half'):
 
 
 # might move elsewhere
-xformers_available = False
-
-try:
-    import xformers.ops
-
-    xformers_available = True
-except Exception:
-    # print("Cannot import xformers", file=sys.stderr)
-    # print(traceback.format_exc(), file=sys.stderr)
-    pass
-
-
 def get_vram_nvidia_smi() -> Tuple[int, int]:
     # Invoke nvidia-smi
     import subprocess
@@ -147,4 +145,4 @@ def get_vram_nvidia_smi() -> Tuple[int, int]:
     used = int(used.decode('utf-8').strip())
     total = int(total.decode('utf-8').strip())
 
-    return used,total
+    return used, total

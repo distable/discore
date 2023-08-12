@@ -1,5 +1,5 @@
 from src import renderer
-from party import maths, pnodes
+from src.party import maths, pnodes
 from src.party.maths import scurve
 from src.party.pnodes import eval_prompt, PGlobals, PList, PProp
 
@@ -106,7 +106,7 @@ layer = PList("background foreground middle ground sky horizon")
 through = PList("through into from above below across around over under")
 # A wild variety of exotic flowers
 flower = PList("dahlia rose tulip daisy orchid lily sunflower poppy iris carnation marigold aster begonia geranium")
-beauty = PList("beautiful jaw-dropping stunning gorgeous breathtaking awe-inspiring awe-inspiring")
+beauty = PList("beautiful jaw-dropping stunning gorgeous breathtaking awe-inspiring awe-inspiring radiant sublime majestic magnificent splendid wonderful amazing marvelous")
 detail = PList("detailed complex elaborate complicated")
 motion = PList("stretching twisting flowing sliding rotating deforming morphing transforming streaking melting condensing evaporating marbling swirling")
 energy = PList("energy movement motion light antimatter vapor fog")
@@ -152,6 +152,8 @@ s2 = PProp(shape, 6, (0.5, 0.6), (0.1, 0.22), 0.5, scale=1.85)
 s3 = PProp(artist, 5, (0.9, 0.985), (0.01, 0.1), 1, scale=1)
 s4 = PProp(textures, width=1.5, p=(0.4, 0.25), drift=.7, lerp=1, scale=1)
 s5 = PProp(fog, width=0.5, p=0.1, drift=0.3, lerp=1, curve=scurve, scale=2)
+s6 = PProp(fog, width=0.1, p=0.1, drift=0.3, lerp=1, curve=scurve, scale=2)
+s7 = PProp(fog, width=0.1, p=0, drift=0, lerp=0, curve=scurve, scale=2)
 confmap = {
     'scenic'    : s5,
     'texture'   : [s5, s4],

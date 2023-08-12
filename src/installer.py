@@ -86,14 +86,14 @@ def gitclone(giturl, hash='master', into_dir=None, name=None):
     if not skip_installations:
         if not clone_dir.exists():
             run(f'"{git}" clone {giturl} {Path(clone_dir)}')
-        else:
-            current_hash = run(f'"{git}" -C {clone_dir} rev-parse HEAD', err=f"Couldn't determine {name}'s hash: {hash}")
-            if current_hash != hash:
-                run(f'"{git}" -C {clone_dir} fetch', err=f"Couldn't fetch {name}")
-                # print(giturl, clonedir, name, commithash)
 
-                if hash is not None and hash != 'master':
-                    run(f'"{git}" -C {clone_dir} checkout {hash}', err=f"Couldn't checkout {name}'s hash: {hash}")
+        current_hash = run(f'"{git}" -C {clone_dir} rev-parse HEAD', err=f"Couldn't determine {name}'s hash: {hash}")
+        if current_hash != hash:
+            run(f'"{git}" -C {clone_dir} fetch', err=f"Couldn't fetch {name}")
+            # print(giturl, clonedir, name, commithash)
+
+            if hash is not None and hash != 'master':
+                run(f'"{git}" -C {clone_dir} checkout {hash}', err=f"Couldn't checkout {name}'s hash: {hash}")
 
     sys.path.append(str(clone_dir.parent))
     sys.path.append(str(clone_dir))
@@ -156,10 +156,10 @@ def open_explorer(directory):
             # xdg-open *should* be supported by recent Gnome, KDE, Xfce
 
 
-def wget(file, url):
+def wget(file, url, document=True):
     if not file.exists():
-        run(f"wget '{url}' --output-document {file.as_posix()}", err=f"Couldn't download {file.name}")
         print(f'"wget {url} --output-document {file.as_posix()}"')
+        run(f"wget '{url}' --output-document {file.as_posix()}", err=f"Couldn't download {file.name}")
 
 def gdown(file, url):
     import gdown
