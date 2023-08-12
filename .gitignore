@@ -1,17 +1,12 @@
 __pycache__
 *.ckpt
 *.pth
-/ESRGAN/*
-/SwinIR/*
 /venv
 /tmp
 /model.ckpt
-/GFPGANv1.3.pth
-/gfpgan/weights/*.pth
 /ui-config.json
 /config.json
 /log
-/webui.settings.bat
 /styles.csv
 /styles.csv.bak
 /webui-user.bat
@@ -33,3 +28,5 @@ mount
 /plug-res/plug-embeddings
 /plug-repos
 /plug_repos
+
+.openai_api_key
