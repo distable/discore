@@ -1,23 +1,77 @@
-from pathlib import Path
-
 import cv2
 import numpy as np
 import requests
+import torch
 from PIL import Image, ImageFile, UnidentifiedImageError
-from src.lib.printlib import trace, trace_decorator
+from src.lib.loglib import trace, trace_decorator, trace_decorator_noargs
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+from pathlib import Path
+
+
+def resize(img, w, h, crop=False):
+    if img is None:
+        return
+
+    if isinstance(img, np.ndarray):
+        if crop:
+            # center anchored crop
+            im = cv2pil(img)
+            im = im.crop((w // 2 - w // 2,
+                          h // 2 - h // 2,
+                          w // 2 + w // 2,
+                          h // 2 + h // 2))
+            return pil2cv(im)
+        else:
+            im = cv2pil(img)
+            im = im.resize((w, h))
+            return pil2cv(im)
+    elif isinstance(img, Image.Image):
+        if crop:
+            # center anchored crop
+            im = img.crop((w // 2 - w // 2,
+                           h // 2 - h // 2,
+                           w // 2 + w // 2,
+                           h // 2 + h // 2))
+            return im
+        else:
+            im = img.resize((w, h))
+            return im
+    elif isinstance(img, torch.Tensor):
+        if crop:
+            raise NotImplementedError('Crop not implemented for torch.Tensor')
+        else:
+            ret = torch.nn.functional.interpolate(img.type(torch.float32).unsqueeze(0), (h, w), mode='bilinear')
+            return ret
+
+
+    raise ValueError(f'Unknown type of img: {type(img)}')
+
 
 def pil2cv(img: Image) -> np.ndarray:
     try:
         return np.asarray(img)
     except Exception as e:
         print(f'Error converting PIL to CV: {e}')
-        return np.ones((img.height, img.width, 3))
+        pink = np.zeros((img.height, img.width, 3))
+        pink[:, :, 0] = 255
+        return pink
 
 
 def cv2pil(img: np.ndarray) -> Image:
     return Image.fromarray(img)
+
+
+def bhwc2cv(bhwc):
+    hwc = np.squeeze(bhwc, axis=0)
+    # hwc = np.transpose(hwc, (1, 2, 0))
+    return hwc.detach().cpu().numpy()
+
+
+def cv2bhwc(hwc):
+    bhwc = np.expand_dims(hwc, axis=0)
+    # bhwc = np.transpose(bhwc, (2, 0, 1))
+    return torch.from_numpy(bhwc).float()
 
 
 def ensure_extension(path: str | Path, ext):
@@ -26,23 +80,22 @@ def ensure_extension(path: str | Path, ext):
         path = path.with_suffix(ext)
     return path
 
+
 def save_jpg(pil, path, with_async=False):
     save_img(pil, path, with_async=with_async, img_format='JPEG')
+
 
 def save_png(pil, path, with_async=False):
     save_img(pil, path, with_async=with_async, img_format='PNG')
 
-def save_img(pil, path, with_async=False, img_format='PNG'):
-    pil = load_pil(pil)
-    if pil is None:
-        return
 
+def save_img(arr, path, with_async=False, img_format='PNG'):
     if img_format[0] == '.':
         img_format = {'.jpg': 'JPEG', '.png': 'PNG'}.get(img_format, None)
         if img_format is None:
             raise ValueError(f'Unknown format: {img_format}')
 
-    with trace(f'save_img({Path(path).relative_to(Path.cwd())}, async={with_async}, {pil})'):
+    with trace(f'save_img({Path(path).relative_to(Path.cwd())}, async={with_async}, {arr.shape})'):
         path = Path(path)
         if img_format == 'PNG':
             path = ensure_extension(path, '.png')
@@ -50,28 +103,33 @@ def save_img(pil, path, with_async=False, img_format='PNG'):
             path = ensure_extension(path, '.jpg')
 
         if with_async:
-            save_async(path, pil)
+            save_async(path, arr)
         else:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-            pil.save(path, format="PNG", quality=90)
+
+            arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+            cv2.imwrite(path.as_posix(), arr)
+    # pil.save(path, format="PNG", quality=90)
 
 
-def save_async(path, pil, format='PNG') -> None:
+def save_async(path, arr, format='PNG') -> None:
     if isinstance(path, Path):
         path = path.as_posix()
+    arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
 
     # Use threaded lambda to save image
     def write(im) -> None:
         try:
-            if isinstance(im, np.ndarray):
-                im = cv2pil(im)
+            # if isinstance(im, np.ndarray):
+            #     im = cv2pil(im)
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-            im.save(path, format='PNG')
+            cv2.imwrite(path, im)
+        # im.save(path, format='PNG')
         except:
-            pass
+            print(f'Error saving image: {path}')
 
     import threading
-    t = threading.Thread(target=write, args=(pil,))
+    t = threading.Thread(target=write, args=(arr,))
     t.start()
 
 
@@ -87,6 +145,7 @@ def save_npy(path, nparray):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.save(str(path), nparray)
+
 
 def load_npy(path):
     path = ensure_extension(path, '.npy')
@@ -149,10 +208,12 @@ def load_pil(path: Image.Image | Path | str, size=None):
 
     return ret
 
+
 def load_pilarr(pil, size=None):
     pil = load_pil(pil, size)
     pil = pil.convert('RGB')
     return np.array(pil)
+
 
 def load_cv2(pil, size=None):
     ret = None
@@ -160,24 +221,33 @@ def load_cv2(pil, size=None):
     has_size = isinstance(size, tuple) and None not in size
     is_web_url = isinstance(pil, str) and pil.startswith('http')
 
-    if isinstance(pil, np.ndarray): ret = pil
-    elif isinstance(pil, Image.Image): ret = pil2cv(pil)
+    if isinstance(pil, np.ndarray):
+        ret = pil
+    elif isinstance(pil, Image.Image):
+        ret = pil2cv(pil)
     elif isinstance(pil, Path):
         try:
-            ret = pil2cv(Image.open(pil.as_posix()))
+            # img = Image.open(pil.as_posix())
+            # ret = pil2cv(img)
+            ret = cv2.imread(pil.as_posix())
+            ret = cv2.cvtColor(ret, cv2.COLOR_BGR2RGB)
         except UnidentifiedImageError:
             return None
     elif is_web_url:
         try:
-            ret = pil2cv(Image.open(requests.get(pil, stream=True).raw))
+            # img = Image.open(requests.get(pil, stream=True).raw)
+            # ret = pil2cv(img)
+            ret = cv2.imread(requests.get(pil, stream=True).raw)
+            ret = cv2.cvtColor(ret, cv2.COLOR_BGR2RGB)
         except UnidentifiedImageError:
             return np.zeros((size[1], size[0], 3), dtype=np.uint8)
             pass
-    elif isinstance(pil, str) and Path(pil).is_file(): ret = cv2.imread(pil)
+    elif isinstance(pil, str) and Path(pil).is_file():
+        ret = cv2.imread(pil)
     elif isinstance(pil, str) and pil.startswith('#'):
         rgb = Image.new('RGB', size or (1, 1), color=pil)
-        rgb = rgb.convert('RGB')
         ret = np.asarray(rgb)
+    # ret = np.zeros((size[1], size[0], 3), dtype=np.uint8)
     elif pil == 'black':
         ret = np.zeros((size[1], size[0], 3), dtype=np.uint8)
     elif pil == 'white':
@@ -185,16 +255,20 @@ def load_cv2(pil, size=None):
     elif isinstance(pil, str) and pil.startswith('#'):
         # color string like 'black', etc.
         rgb = Image.new('RGB', size or (1, 1), color=pil)
-        rgb = rgb.convert('RGB')
         ret = np.asarray(rgb)
     elif has_size:  # load_cv2 always tries to return some sort of img array no matter what
         ret = np.ones((size[1], size[0], 3), dtype=np.uint8) * 255
         ret[:, :, 0] = 255
 
+    # Remove alpha channel
+    if ret is not None and ret.shape[2] == 4:
+        ret = ret[:, :, :3]
+
     if has_size and ret.shape[:2] != size:
         ret = cv2.resize(ret, size)
 
     return ret
+
 
 def load_torch(path_or_cv2):
     import torch
@@ -202,23 +276,33 @@ def load_torch(path_or_cv2):
     img = torch.from_numpy(img).permute(2, 0, 1).float()
     return img
 
+
 def load_txt(path):
     path = Path(path)
     if not path.is_file():
         return None
     with open(path.as_posix(), 'r') as r:
         return r.read().strip()
+
+
 def save_txt(path, txt):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path.as_posix(), 'w') as w:
         w.write(txt)
 
-def crop_or_pad(image, width, height, bg=(0, 0, 0), anchor=(0.5, 0.5)):
+
+def crop_or_pad(image, width=None, height=None, bg=(0, 0, 0), anchor=(0.5, 0.5)):
     h_img, w_img, _ = image.shape
 
     if width == w_img and height == h_img:
         return image  # No need to crop or pad if dimensions are already equal
+
+    # If width or height is None, calculate it from the other dimension (to preserve aspect ratio)
+    if width is None and height is None:
+        width = int(height * w_img / h_img)
+    elif height is None and width is not None:
+        height = int(width * h_img / w_img)
 
     # Calculate the padding sizes
     pad_left = 0
@@ -246,6 +330,9 @@ def crop_or_pad(image, width, height, bg=(0, 0, 0), anchor=(0.5, 0.5)):
     image = cv2.copyMakeBorder(image, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=(0, 0, 0, 1))
 
     return image
+
+def is_image(value):
+    return isinstance(value, np.ndarray) or isinstance(value, Image.Image) or isinstance(value, torch.Tensor)
 
 # def crop_or_pad(ret, w, h, param):
 #     """

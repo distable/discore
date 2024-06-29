@@ -163,6 +163,7 @@ def wget(file, url, document=True):
 
 def gdown(file, url):
     import gdown
+    file = Path(file)
     if not file.exists():
         gdown.download(url, file.as_posix(), quiet=False)
         print(f'"gdown {url} {file.as_posix()}"')

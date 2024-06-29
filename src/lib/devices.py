@@ -97,7 +97,7 @@ def autocast(disable=False):
     raise ValueError(f"Unknown precision {precision}")
 
 
-has_mps = getattr(torch, 'has_mps', False)
+has_mps = torch.backends.mps.is_built()
 cpu = torch.device("cpu")
 
 # State values

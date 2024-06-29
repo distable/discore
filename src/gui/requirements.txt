@@ -1,2 +1,2 @@
 pyqtgraph
-pyqt6
+pyqt5

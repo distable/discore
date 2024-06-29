@@ -2,6 +2,7 @@ import datetime
 from pathlib import Path
 
 import numpy as np
+from PyQt5.QtMultimedia import QMediaContent
 
 
 class AudioPlayback:
@@ -23,13 +24,14 @@ class AudioPlayback:
         self.on_playback_start = []
         self.on_playback_stop = []
 
-    def init(self, paths, names=None, root=None):
-        from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
+    def init(self):
+        from PyQt5.QtMultimedia import QAudioOutput, QMediaPlayer
         self.player = QMediaPlayer()
-        self.output = QAudioOutput()
-        self.output.setVolume(50)
-        self.player.setAudioOutput(self.output)
+        # self.output = QAudioOutput()
+        # self.output.setVolume(50)
+        # self.player.setAudioOutput(self.output)
 
+    def discover_audio(self, *, paths='*', root):
         if paths == '*':
             paths = self.find_paths_in_folder(root)
         elif isinstance(paths, str):
@@ -68,8 +70,8 @@ class AudioPlayback:
 
 
     def is_playing(self):
-        from PyQt6.QtMultimedia import QMediaPlayer
-        return self.player is not None and self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+        from PyQt5.QtMultimedia import QMediaPlayer
+        return self.player is not None and self.player.state() == QMediaPlayer.PlayingState
 
     def get_playback_t(self):
         elapsed = (datetime.datetime.now() - self.start_time_wall).total_seconds()
@@ -116,8 +118,7 @@ class AudioPlayback:
             self.play(self.get_playback_t())
 
     def flush_requests(self):
-        from PyQt6.QtCore import QUrl
-        from PyQt6 import QtCore
+        from PyQt5.QtCore import QUrl
 
         for request in self.requests:
             # print(request)
@@ -128,7 +129,10 @@ class AudioPlayback:
             elif rtype == 'play':
                 filepath = request[1]
                 t = request[2]
-                self.player.setSource(QUrl.fromLocalFile(filepath.as_posix()))
+
+                media_url = QUrl.fromLocalFile(filepath.as_posix())
+                media = QMediaContent(media_url)
+                self.player.setMedia(media)
                 self.player.setPosition(int(t * 1000))
 
                 # Calling directly randomly crashes the application with no error o_O

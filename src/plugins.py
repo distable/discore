@@ -18,8 +18,8 @@ from src.classes import paths
 from src.classes.logs import logplugin, logplugin_err
 from src.classes.paths import short_pid
 from src.classes.Plugin import Plugin
-from src.lib.printlib import print_bp, print
-from src.lib.printlib import trace
+from src.lib.loglib import print_bp, print
+from src.lib.loglib import trace
 from src import installer
 
 # STATE
@@ -150,7 +150,7 @@ def instantiate_plugin_at(path: Path, with_install=False):
         print(f'Plugin {pid} is already loaded.')
         return matches[0]
 
-    print(f"Instantiating plugin {pid} ...")
+    # print(f"Instantiating plugin {pid} ...")
 
     try:
         plugin_dirs.append(path)
@@ -265,6 +265,9 @@ def instantiate_plugins_in(loaddir: Path, log=False, install=True):
 
 def iter_plugins(loaddir):
     for p in loaddir.iterdir():
+        if p.stem.endswith('.disabled'):
+            continue
+
         if p.stem.startswith('.'):
             continue
 

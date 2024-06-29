@@ -1,17 +1,25 @@
 from PIL import Image, ImageDraw, ImageFont
 from yachalk import chalk
 
-from src.lib import printlib
-from src.lib.printlib import printkw
+from src.lib import loglib
+from src.lib.loglib import printkw
 from src.classes import paths
 from src.classes.convert import save_png
-from src import renderer
+from src.rendering.rendervars import RenderVars
+
+log = loglib.make_log('tricks')
+logerr = loglib.make_logerr('tricks')
 
 snaps = []
 rows = []  # list[tuple[str, tuple[int, int, int]]]
 rows_tmp = []
 draw_signals = []
-enable_printing = True
+rv:RenderVars = None
+
+def is_printing_enabled():
+    from src import renderer
+    return renderer.is_cli()
+
 
 class DrawSignal:
     def __init__(self, name):
@@ -25,7 +33,7 @@ def update_draw_signals():
     Update the min and max of all signals
     """
     for s in draw_signals:
-        signal = renderer.rv.signals.get(s.name)
+        signal = rv._signals.get(s.name)
         if signal is not None:
             s.min = signal.min()
             s.max = signal.max()
@@ -43,7 +51,7 @@ def set_draw_signals(*names):
 
 def snap(name, img=None):
     if img is None:
-        img = renderer.session.img.copy()
+        img = rv.session.img.copy()
     snaps.append((name, img))
 
 def hud(*args, tcolor=(255, 255, 255), **kwargs):
@@ -51,21 +59,21 @@ def hud(*args, tcolor=(255, 255, 255), **kwargs):
     # Format numbers to 3 decimal places (if they are number)
     s = ''
     for a in args:
-        s += printlib.value_to_print_str(a)
+        s += loglib.value_to_print_str(a)
         s += ' '
 
     # TODO auto-snap if kwargs is ndarray hwc
 
     for k, v in kwargs.items():
-        s += f'{printlib.value_to_print_str(k)}='
-        s += printlib.value_to_print_str(v)
+        s += f'{loglib.value_to_print_str(k)}='
+        s += loglib.value_to_print_str(v)
         s += ' '
 
     maxlen = 80
     s = '\n'.join([s[i:i + maxlen] for i in range(0, len(s), maxlen)])
 
-    if enable_printing:
-        printkw(**kwargs, chalk=chalk.magenta)
+    if is_printing_enabled():
+        printkw(**kwargs, chalk=chalk.magenta, print_func=log)
     rows.append((s, tcolor))
 
 
@@ -121,3 +129,45 @@ def to_pil(session):
             y += ht
 
     return new_pil
+
+
+
+
+# ----------------------
+
+def hud_base():
+    hud(chg=rv.chg, cfg=rv.cfg, seed=rv.seed)
+    hud_ccg()
+    hud(prompt=rv.prompt)
+
+
+def hud_ccg():
+    ccgs = []
+    iccgs = []
+    ccgas = []
+    ccgbs = []
+    i = 1
+    while f'ccg{i}' in rv:
+        ccg = rv[f'ccg{i}']
+        iccg = rv[f'iccg{i}']
+        ccga = rv[f'ccg{i}_a']
+        ccgb = rv[f'ccg{i}_b']
+        ccgs.append(ccg)
+        iccgs.append(iccg)
+        ccgas.append(ccga)
+        ccgbs.append(ccgb)
+        i += 1
+    hud(ccgs=tuple(ccgs))
+    hud(iccgs=tuple(iccgs))
+    hud(ccgas=tuple(ccgas))
+    hud(ccgbs=tuple(ccgbs))
+
+
+def snap_ccg_imgs():
+    print("SNAP_CCG_IMGS")
+    # std.save_guidance_imgs((rv.ccg3_img, rv.ccg2_img, rv.ccg1_img))
+    i = 1
+    while f'ccg{i}_img' in rv:
+        img = rv[f'ccg{i}_img']
+        snap(f'ccg{i}_img', img)
+        i += 1

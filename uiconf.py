@@ -1,44 +1,70 @@
+from PyQt5 import QtCore
+
 hobo_seek_percent = 1 / 15
 
-from PyQt6 import QtCore
 qkey = QtCore.Qt.Key
 
-key_pause = qkey.Key_Space
-key_cancel = qkey.Key_Escape
-key_reload_script = qkey.Key_R
+key_pause = 'space'
+key_cancel = 'espace'
+key_reload_script = 'r'
+key_reload_script_hard = 's-r'
 
-key_seek_prev = qkey.Key_Left
-key_seek_next = qkey.Key_Right
-key_seek_prev_second = qkey.Key_Up
-key_seek_next_second = qkey.Key_Down
-key_seek_prev_percent = qkey.Key_PageUp
-key_seek_next_percent = qkey.Key_PageDown
-key_seek_first = qkey.Key_Home
-key_seek_first_2 = qkey.Key_H
-key_seek_first_3 = qkey.Key_0
-key_seek_last = qkey.Key_N
-key_seek_last_2 = qkey.Key_End
+key_seek_prev = 'left'
+key_seek_next = 'right'
+key_seek_prev_second = 'up'
+key_seek_next_second = 'down'
+key_seek_prev_percent = 'pageup'
+key_seek_next_percent = 'pagedown'
+key_seek_first = 'home', 'h', '0'
+key_seek_last = 'n', 'end'
 
-key_fps_down = qkey.Key_BracketLeft
-key_fps_up = qkey.Key_BracketRight
-key_copy_frame = qkey.Key_C
-key_paste_frame = qkey.Key_V
-key_delete = qkey.Key_Delete
-key_render = qkey.Key_Return
-key_toggle_hud = qkey.Key_F
-key_toggle_action_mode = qkey.Key_W
+key_fps_down = 'bracketleft'
+key_fps_up = 'bracketright'
+key_copy_frame = 'c'
+key_paste_frame = 'v'
+key_delete_frame = 'delete'
+key_render_once = 'return'
+key_render_forever = 's-return'
+key_toggle_hud = 'f'
+key_toggle_action_mode = 'w'
 
-key_select_segment_prev = qkey.Key_Less
-key_select_segment_next = qkey.Key_Greater
-key_set_segment_start = qkey.Key_I
-key_set_segment_end = qkey.Key_O
-key_seek_prev_segment = qkey.Key_Comma
-key_seek_next_segment = qkey.Key_Period
-key_play_segment = qkey.Key_P
+key_segment_select_prev = 'less'
+key_segment_select_next = 'greater'
+key_segment_set_start = 'i'
+key_segment_set_end = 'o'
+key_seek_prev_segment = 'comma'
+key_seek_next_segment = 'period'
+key_play_segment = 'p'
 
-key_toggle_ryusig = qkey.Key_Tab
+key_toggle_ryusig = 'tab', 'escape'
 
-key_dbg_up = qkey.Key_Equal
-key_dbg_down = qkey.Key_Minus
-key_dbg_cycle_increment = qkey.Key_Backslash
+key_dbg_up = 'equal'
+key_dbg_down = 'minus'
+key_dbg_cycle_increment = 'backslash'
+key_open_script_in_editor = 'c-e'
+key_open_in_terminal = 'c-s-e'
+key_show_session_in_explorer = 's-e'
+key_reload_session = 's-r'
 
+key_switch_session_with_cache_reload = 'c-s-r'
+key_switch_session = 'c-r'
+key_run_action = 'c-a', 'c-s-a'
+key_toggle_dev_mode = '2'
+key_toggle_trace = '3'
+key_toggle_bake_enabled = 'b'
+
+key_snapshot_prev = 's-left'
+key_snapshot_next = 's-right'
+
+key_set_last_frame = 's-end'
+
+
+# ----------------------------------------
+
+
+key_ryusig_toggle_ryusig = 'tab', 'escape'
+key_ryusig_toggle_time = 'f2'
+key_ryusig_toggle_pause = 'space'
+key_ryusig_toggle_norm = 'tab'
+key_ryusig_reframe = '\\'
+key_ryusig_dump_timestamps = 'c-s-m'

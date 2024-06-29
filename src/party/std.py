@@ -1,37 +1,46 @@
 """
-This script implements my bread & butter for AI animation,
-it's the core of all my renders and essentially the "standard renderer"
-that you'd wanna use.
+This script implements bread & butter techniques for AI animation,
+it's the core of all my renders and essentially the standard render
+process
 """
 import shlex
 from pathlib import Path
+from typing import Optional, Callable, List, Tuple
 
 import cv2
 import numpy as np1
+import torch
 
 import jargs
+from scripts.interfaces import diffusers_lib
 from src import plugins, renderer
 from src.classes import convert, paths
 from src.classes.common import first_non_null
-from src.classes.convert import load_cv2
+from src.lib import loglib
 from src.lib.corelib import shlexrun
-from src.lib.printlib import trace_decorator
-from src.party import audio, maths, tricks
+from src.lib.loglib import trace_decorator_noargs
+from src.party import audio, maths, signals, tricks
 from src.party.audio import load_lufs
 from src.party.lang import confmap
 from src.party.maths import *
-from src.party.pnodes import bake_prompt
-from src.party.signals import load_vr
-from src.party.tricks import img_to_canny, img_to_hed, shade_depth
-from src.rendering import dbg, hud
+from src.party.ravelang import pnodes
+from src.rendering import hud
 
 rv = renderer.rv
 session = renderer.session
 
 eps = np.finfo(float).eps
 
+do_init_flow = tricks.do_init_flow
+
+log: callable = loglib.make_log('std')
+logerr: callable = loglib.make_logerr('std')
+
+
 def init_img_exists():
-    return session.res('init') is not None
+    img, mus, vid = session.res_init()
+    return img is not None or vid is not None
+
 
 def init_media(demucs=True):
     img = session.res('init', extensions=paths.image_exts)
@@ -39,38 +48,13 @@ def init_media(demucs=True):
     vid = session.res('init', extensions=paths.video_exts)
 
     if vid:
-        print(f"Init mode: video ({vid})")
-        session.extract_frames(vid)
-        if not session.res_music():
-            session.extract_music('init', hide=True)
-
-        init_music(demucs)
-
-        optflow = plugins.get('opticalflow')
-        optflow.precompute()
-
-        # tricks.precompute_sam(vid)
-
-        # z=~25  0.275 0.4
-        rv.ccg1 = 0.83
-        rv.ccg2 = 0.38
-        rv.ccg3 = 0.38 + nprng(0, 0.05)  # lerp(, 0.55, jcurve(rv.dtcam))
-        rv.iccg1 = 0.985
-        rv.iccg2 = 0
-        rv.iccg3 = 0.85
-        rv.canny_lo = 25
-        rv.canny_hi = 100
-
-        rv.init_flow_strength = 1
-        rv.init_flow_blur = 0
-    elif img and mus:
-        print(f"Init mode: image ({img}) + music ({mus})")
+        log(f"Init mode: image ({img}) + music ({mus})")
         init_music(demucs)
     elif mus:
-        print(f"Init mode: music ({mus})")
+        log(f"Init mode: music ({mus})")
         init_music(demucs)
     elif img:
-        print(f"Init mode: image ({img})")
+        log(f"Init mode: image ({img})")
         init_music(demucs)
 
 
@@ -83,9 +67,10 @@ def get_demucs_paths(dirpath):
     guitar = dirpath / f'.demucs/guitar{paths.audio_ext}'
     return pianos, bass, drums, guitar, other, vocals
 
+
 def run_demucs(fpath):
     if jargs.args.remote:
-        print("Demucs not supported in remote mode. Run locally first and generate the audio data, then deploy again to send that data.")
+        log("Demucs not supported in remote mode. Run locally first and generate the audio data, then deploy again to send that data.")
         return
 
     fpath = Path(fpath)
@@ -95,6 +80,8 @@ def run_demucs(fpath):
 
     if piano.exists() and drums.exists() and bass.exists() and other.exists() and vocals.exists() and guitar.exists():
         return
+
+    log("Running Demucs ...")
 
     model = 'htdemucs_6s'
 
@@ -109,11 +96,12 @@ def run_demucs(fpath):
 
         outpath = f'{piano.parent}/{f.stem}{paths.audio_ext}'
         paths.mktree(outpath)
-        shlexrun(f"ffmpeg -i '{f}' -acodec {paths.audio_codec} -b:a 224k '{outpath}' -y")
+        shlexrun(f"ffmpeg -i '{f}' -acodec {paths.audio_codec} -b:a 224k '{outpath}' -y", silent=True)
         if f is not None:  # wat
             f.unlink()
 
     paths.rmtree(dirpath / model)
+
 
 def init_music(demucs=False):
     # Only music, no instruments
@@ -127,8 +115,8 @@ def init_music(demucs=False):
     rv.vocals = np1.zeros(rv.n)
 
     if path.exists():
-        rv.has_music = True
-        rv.music = load_lufs(path)
+        # rv.has_music = True
+        # rv.music = load_lufs(path)
 
         if demucs:
             rv.has_demucs = True
@@ -177,28 +165,28 @@ def init_music(demucs=False):
             rv.vocals_onset = audio.load_onset(fvocals)
 
             rv.flatness = audio.load_flatness(path)
-            # rv.piano_flatness = audio.load_flatness(fpiano)
-            # rv.bass_flatness = audio.load_flatness(fbass)
-            # rv.guitar_flatness = audio.load_flatness(fguitar)
-            # rv.other_flatness = audio.load_flatness(fother)
-            # rv.drum_flatness = audio.load_flatness(fdrum)
-            # rv.vocals_flatness = audio.load_flatness(fvocals)
+        # rv.piano_flatness = audio.load_flatness(fpiano)
+        # rv.bass_flatness = audio.load_flatness(fbass)
+        # rv.guitar_flatness = audio.load_flatness(fguitar)
+        # rv.other_flatness = audio.load_flatness(fother)
+        # rv.drum_flatness = audio.load_flatness(fdrum)
+        # rv.vocals_flatness = audio.load_flatness(fvocals)
 
-            # rv.changes, rv.onset, rv.beat, rv.chroma, rv.spectral, rv.mfcc, rv.bandwidth, rv.flatness, rv.centroid, rv.sentiment = audio.load_rosa(path)
-            # rv.piano_changes, rv.piano_onset, rv.piano_beat, rv.piano_chroma, rv.piano_spectral, rv.piano_mfcc, rv.piano_bandwidth, rv.piano_flatness, rv.piano_centroid, rv.piano_sentiment = audio.load_rosa(fpiano)
-            # rv.bass_changes, rv.bass_onset, rv.bass_beat, rv.bass_chroma, rv.bass_spectral, rv.bass_mfcc, rv.bass_bandwidth, rv.bass_flatness, rv.bass_centroid, rv.bass_sentiment = audio.load_rosa(fbass)
-            # rv.guitar_changes, rv.guitar_onset, rv.guitar_beat, rv.guitar_chroma, rv.guitar_spectral, rv.guitar_mfcc, rv.guitar_bandwidth, rv.guitar_flatness, rv.guitar_centroid, rv.guitar_sentiment = audio.load_rosa(fguitar)
-            # rv.other_changes, rv.other_onset, rv.other_beat, rv.other_chroma, rv.other_spectral, rv.other_mfcc, rv.other_bandwidth, rv.other_flatness, rv.other_centroid, rv.other_sentiment = audio.load_rosa(fother)
-            # rv.drum_changes, rv.drum_onset, rv.drum_beat, rv.drum_chroma, rv.drum_spectral, rv.drum_mfcc, rv.drum_bandwidth, rv.drum_flatness, rv.drum_centroid, rv.drum_sentiment = audio.load_rosa(fdrum)
-            # rv.vocals_changes, rv.vocals_onset, rv.vocals_beat, rv.vocals_chroma, rv.vocals_spectral, rv.vocals_mfcc, rv.vocals_bandwidth, rv.vocals_flatness, rv.vocals_centroid, rv.vocals_sentiment = audio.load_rosa(fvocals)
+        # rv.changes, rv.onset, rv.beat, rv.chroma, rv.spectral, rv.mfcc, rv.bandwidth, rv.flatness, rv.centroid, rv.sentiment = audio.load_rosa(path)
+        # rv.piano_changes, rv.piano_onset, rv.piano_beat, rv.piano_chroma, rv.piano_spectral, rv.piano_mfcc, rv.piano_bandwidth, rv.piano_flatness, rv.piano_centroid, rv.piano_sentiment = audio.load_rosa(fpiano)
+        # rv.bass_changes, rv.bass_onset, rv.bass_beat, rv.bass_chroma, rv.bass_spectral, rv.bass_mfcc, rv.bass_bandwidth, rv.bass_flatness, rv.bass_centroid, rv.bass_sentiment = audio.load_rosa(fbass)
+        # rv.guitar_changes, rv.guitar_onset, rv.guitar_beat, rv.guitar_chroma, rv.guitar_spectral, rv.guitar_mfcc, rv.guitar_bandwidth, rv.guitar_flatness, rv.guitar_centroid, rv.guitar_sentiment = audio.load_rosa(fguitar)
+        # rv.other_changes, rv.other_onset, rv.other_beat, rv.other_chroma, rv.other_spectral, rv.other_mfcc, rv.other_bandwidth, rv.other_flatness, rv.other_centroid, rv.other_sentiment = audio.load_rosa(fother)
+        # rv.drum_changes, rv.drum_onset, rv.drum_beat, rv.drum_chroma, rv.drum_spectral, rv.drum_mfcc, rv.drum_bandwidth, rv.drum_flatness, rv.drum_centroid, rv.drum_sentiment = audio.load_rosa(fdrum)
+        # rv.vocals_changes, rv.vocals_onset, rv.vocals_beat, rv.vocals_chroma, rv.vocals_spectral, rv.vocals_mfcc, rv.vocals_bandwidth, rv.vocals_flatness, rv.vocals_centroid, rv.vocals_sentiment = audio.load_rosa(fvocals)
         else:
             rv.has_demucs = False
     else:
-        print("std.init_music: No music file found, filling with zeros ...")
+        log("std.init_music: No music file found, filling with zeros ...")
         rv.has_music = False
 
 
-def init_vr(xy_vel=1000, z_vel=500, r_vel=1 / 15):
+def load_vr(xy_vel=1000, z_vel=500, r_vel=1 / 15):
     """
     Load the VR data into rv
     """
@@ -206,7 +194,7 @@ def init_vr(xy_vel=1000, z_vel=500, r_vel=1 / 15):
     path = session.res('vr.json')
     if path:
         # vr = load_vr(path, beta=30.005, min_cutoff=0.15, one_euro=True)
-        vr = load_vr(path, beta=0.25, min_cutoff=0.004, one_euro=True)
+        vr = signals.load_vr(path, beta=0.25, min_cutoff=0.004, one_euro=True)
 
         x = vr.HeadPos.dd1 * xy_vel
         y = vr.HeadPos.dd2 * xy_vel
@@ -241,21 +229,23 @@ def init_vr(xy_vel=1000, z_vel=500, r_vel=1 / 15):
                 abs(zr / z_vel)
         dt_vr /= dt_vr.max()
     else:
-        print("No VR.json found, filling with zeroes ...")
+        log("No VR.json found, filling with zeroes ...")
         n = rv.n
         x, y, z = np.zeros(n), np.zeros(n), np.zeros(n)
         xl, yl, zl, rl = np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n)
         xr, yr, zr, rr = np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n)
         dt_vr = np.zeros(n)
 
-    rv.save_signals(**locals())
+    # rv.save_signals(**locals())
     return (x, y, z), (xl, yl, zl, rl), (xr, yr, zr, rr), dt_vr
+
 
 last_seed = None
 seed_frames_elapsed = 0
 frames_since_cn = 0
 
-def is_render_switch():
+
+def is_cn_switch():
     global frames_since_cn
     every, _ = tricks.get_v1v2_schedule_stride(rv.cn_switch)
     ret = tricks.schedule_01(rv.cn_switch) == 1 or frames_since_cn >= every
@@ -265,192 +255,42 @@ def is_render_switch():
         frames_since_cn = 0
     return ret
 
-@trace_decorator
-def render_switch(diffusers, get_guidance=None, get_detail=None, after_cn=None):
-    global last_seed, seed_frames_elapsed
 
-    if get_guidance is None:
-        get_guidance = get_cn_guidance
+def save_guidance_imgs(guidance, frequency=1):
+    # It can produce too much data to download quickly enough and we may fall behind on frames, because ssh tunnel can be slow as shit with a bunch of tiny files
+    if jargs.args.remote and frequency < 5:
+        frequency = 5
 
-    if rv.skip_diffusion:
-        return
-
-    is_cn = tricks.schedule_01(rv.cn_switch, hudname='cn_render') or rv.force_cn > 0.5
-    is_img2img = tricks.schedule_01(rv.i2i_switch, hudname='cn_render') or rv.force_cn > 0.5
-    hud.hud(iccg1=rv.iccg1, iccg2=rv.iccg2, iccg3=rv.iccg3)
-
-    if is_cn == 1:
-        if get_detail is not None:
-            rv.img = get_detail()
-        guidance = get_guidance()
-
-        for i,im_guidance in enumerate(guidance):
-            hud.snap(f'guidance_{i}', im_guidance)
-
-        if rv.depth is not None:
-            rv.ccg4 = 0  # lerp(0.1, 0.2, abs(rv.depth.max() - rv.depth.min()))  # Maximize depth
-
-        # Attenuate seed changes
-        if last_seed != rv.seed:
-            last_seed = rv.seed
-            seed_frames_elapsed = 0
-        else:
-            seed_frames_elapsed += rv.dt
-
-        if rv.seed_atten_time > 0:
-            rv.ccg1 += lerp(rv.seed_atten_ccg1, 0, seed_frames_elapsed / rv.seed_atten_time * rv.fps)
-            rv.ccg2 += lerp(rv.seed_atten_ccg2, 0, seed_frames_elapsed / rv.seed_atten_time * rv.fps)
-            rv.ccg3 += lerp(rv.seed_atten_ccg3, 0, seed_frames_elapsed / rv.seed_atten_time * rv.fps)
-
-        debug_frequence = 1
-        if jargs.args.remote:
-            debug_frequence = 5 # It can produce too much data to download quickly enough and we may fall behind on frames
-        if rv.f % 5 == 0:
-            convert.save_img(guidance[0], session.res('guidance_0.jpg', return_missing=True), with_async=True)
-            convert.save_img(guidance[1], session.res('guidance_1.jpg', return_missing=True), with_async=True)
-            # convert.save_img(guidance[2], session.res('guidance_2.jpg', return_missing=True), with_async=True)
-            print("Saving guidance imgs...")
-
-        if not is_img2img:
-            rv.img = diffusers.txt2img_cn(
-                    image=guidance,
-                    ccg=[rv.ccg1, rv.ccg3],
-                    prompt=rv.prompt, promptneg=rv.promptneg,
-                    seed=rv.seed, steps=rv.steps, chg=rv.cn_chg, w=rv.w, h=rv.h, cfg=rv.cfg, sampler=rv.sampler)
-        else:
-            rv.img = diffusers.img2img_cn(
-                    image=rv.img,
-                    guidance=guidance,
-                    ccg=[rv.ccg1, rv.ccg3],
-                    prompt=rv.prompt, promptneg=rv.promptneg,
-                    seed=rv.seed, steps=rv.steps, chg=rv.chg, w=rv.w, h=rv.h, cfg=rv.cfg, sampler=rv.sampler, seed_grain=rv.cn_chg)
-
-        # rv.img = diffusers.img2img(
-        #     image=rv.img,
-        #     prompt=rv.prompt, promptneg=rv.promptneg,
-        #     seed=rv.nextseed, steps=rv.steps*1.33, chg=0.25, w=rv.w, h=rv.h, cfg=rv.cfg)
+    if rv.f % frequency == 0:
+        # save each guidance image
+        log("Saving guidance imgs...")
+        for i, im_guidance in enumerate(guidance):
+            hud.snap(f'ccg_img{i + 1}', im_guidance)
+            convert.save_img(im_guidance, session.res(f'dbg_guidance_{i}.jpg', return_missing=True), with_async=True)
 
 
-        if after_cn is not None:
-            after_cn()
-
-        # cc = tricks.palette(rv, rv.img, last_frame_img)
-        # rv.img = tricks.alpha_blend(rv.img, cc, lerp(0.845, 0.5, rv.dtcam))
-
-        # Shade the image with the depth
-        shade_depth()
-    else:
-        rv.seed = rv.nextseed
-        rv.img = diffusers.img2img(
-                image=rv.img,
-                prompt=rv.prompt, promptneg=rv.promptneg,
-                seed=rv.nextseed, steps=rv.steps, chg=rv.chg, w=rv.w, h=rv.h, cfg=rv.cfg)
-
-def get_cn_guidance():
-    from src.classes import convert
-
-    midas = plugins.get('midas')
-    diffusers = plugins.get('sd_diffusers')
-
-    guidance_img1 = rv.img
-    guidance_img2 = rv.img
-    guidance_img3 = rv.depth #tricks.get_depth(rv.img)
-
-    # convert.save_img(depth_better, session.res('guidance_3_better.jpg'))
-    # guidance_img3 = tricks.get_depth(rv.img)
-
-    # This will make the colors bleed all over the place
-    # while ccg1 preserves the composition
-    # cool as fuck
-    # guidance_img2 = midas.mat3d(
-    #         z=25 * jcurve(rv.amp, rv.curved_sharpness) + 30 * jcurve(rv.spk2, 0.5),
-    #         far=20000,
-    #         fov=82.5,
-    #         w_midas=2.2,
-    #         sampling_mode='nearest')
-
-    # Either init image or cn_img
-    init_anchor = (.5,.5)
-    if rv.has_signal('init_anchor_x'): init_anchor = (rv.init_anchor_x, init_anchor[1])
-    if rv.has_signal('init_anchor_y'): init_anchor = (init_anchor[0], rv.init_anchor_y)
-    cn_img = first_non_null(rv.init_img, rv.img)
-
-    # cn_img = tricks.load_cv2(cn_img)
-    if rv.has_signal('init_contrast'):
-        # cn_img = tricks.do_histogram_norm(cn_img)
-        # cn_img = tricks.do_histogram_stretch(cn_img)
-        # cn_img = tricks.selective_contrast_enhancement(cn_img, 0.3, 0.75) #dbg.v1, dbg.v2)
-        cn_img = tricks.contrast(cn_img, rv.init_contrast)
-
-    if rv.has_signal('init_blur'):
-        cn_img = tricks.get_blurred(cn_img, rv.init_blur)
-
-    # Horizontal duplication
-    # d = 20
-    # cn_imgl = cn_img
-    # cn_imgl = tricks.mat2d(cn_imgl, x=-d, y=0)
-    # cn_imgr = cn_img
-    # cn_imgr = tricks.mat2d(cn_imgr, x=d, y=0)
-    # cn_img = tricks.alpha_blend(cn_img, cn_imgl, 0.5)
-    # cn_img = tricks.alpha_blend(cn_img, cn_imgr, 0.5)
-
-    cn_img = tricks.mat2d(cn_img, x=rv.init_x, y=rv.init_y, z=rv.init_z)
-
-    # cn_img = tricks.do_canny_edge_reinforce(cn_img, 0.025, 0.01)
-
-    # Inject the cn_img
-    if cn_img is not None:
-        # cn_img_flow = tricks.res_flow_cv2('init')
-        # flow_mask = tricks.get_flow_mask()
-
-        guidance_img1 = tricks.alpha_blend(guidance_img1, cn_img, rv.iccg1)
-        guidance_img2 = tricks.alpha_blend(guidance_img2, cn_img, rv.iccg2)
-        guidance_img3 = tricks.alpha_blend(guidance_img3, tricks.get_depth(cn_img), rv.iccg3)
-        # depth_better = tricks.get_depth(cn_img)
-
-        if renderer.enable_dev:
-            rv.img = cn_img
-
-    # Inject perspective depth
-    perp = tricks.get_yperp_mask() + cv2.flip(tricks.get_yperp_mask(), 0)
-    guidance_img3_ground = tricks.alpha_blend(guidance_img3, perp, rv.ground)
-    ground_clip_plane = 0.5*255
-    guidance_img3[guidance_img3 < ground_clip_plane] = guidance_img3_ground[guidance_img3 < ground_clip_plane]
-
-    if diffusers.cn_names[0] == 'hed':
-        guidance_img1 = img_to_hed(guidance_img1)
-        # Use CV2 to sharpen guidance_img2 with convolutions
-        guidance_img1 = cv2.detailEnhance(guidance_img1, sigma_s=10, sigma_r=0.15)
-        # Multiply with guidance_img3 which is depth
-        # guidance_img1 = guidance_img1 * rc(guidance_img3/255, 0.75)
-        # guidance_img1 = np.clip(guidance_img1, 0, 255)
-        # guidance_img1 = guidance_img1.astype(np.uint8)
-    elif diffusers.cn_names[0] == 'canny':
-        guidance_img1 = img_to_canny(guidance_img1, rv.canny_lo, rv.canny_hi)
-
-    # Multiply with guidance_img3 which is depth
-    # guidance_img2 = guidance_img2 * rc(guidance_img3/255, 0.75)
-    # guidance_img2 = np.clip(guidance_img2, 0, 255)
-    # guidance_img2 = guidance_img2.astype(np.uint8)
-
-    # img_bw = cv2.cvtColor(guidance_img1, cv2.COLOR_BGR2GRAY)
-    # img_bw = np.expand_dims(img_bw, axis=2)
-    # img_bw = np.concatenate((img_bw, img_bw, img_bw), axis=2)
-    # guidance_img1 = tricks.alpha_blend(img_bw, guidance_img1, 0.5)
-
-    #
-    return guidance_img1, guidance_img3 # load_cv2('D:\\Projects\\discore\\sessions\\eclair-cosmologies\\00001739.png')#, session.res_frame_cv2('seg', rv.f)
+prompt_last = None
 
 
-@trace_decorator
-def refresh_prompt(prompt, **nodes):
+def refresh_prompt(**kwargs):
+    set_prompt(kwargs)
+
+
+@trace_decorator_noargs
+def set_prompt(prompt, **kwargs):
     from src.party import lang
-    if rv.nprompt is None or prompt != rv.prompt_last:
-        # print("REFRESH PROMPT - WHY? ", rv.prompt_last, prompt, rv.nprompt is None)
-        rv.prompt_last = prompt
+    if kwargs is None:
+        kwargs = renderer.script.__dict__
+
+    global prompt_last
+    if rv.nprompt is None or prompt != prompt_last:
+        prompt_last = prompt
         maths.set_seed(rv.session.name, with_torch=False)
-        dic = {**lang.__dict__, **nodes}
-        rv.nprompt = bake_prompt(prompt, confmap, dic)
+        dic = {**lang.__dict__, **kwargs}
+        rv.nprompt = pnodes.bake_prompt(prompt, confmap, dic)
+
+
+# rv.nprompt.update_state()
 
 
 class DynamicFlow:
@@ -460,23 +300,8 @@ class DynamicFlow:
         self.current_flow_pos = 0
         self.current_flow_len = 0
 
+
 dynflow = DynamicFlow()
-
-def do_init_flow():
-    if renderer.enable_dev:
-        return
-
-    if not session.res('init'):
-        return
-
-    # rv.img = tricks.flow_warp_image(rv.img, init='init')
-    # tricks.precompute_flows('init')
-    # flow = tricks.res_flow_cv2('init')
-    optflow = plugins.get('opticalflow')
-    flow = optflow.fetch_flow('init')
-    # rv.img = tricks.mat2d(rv.img, x=rv.init_x, y=rv.init_y)
-    rv.img = tricks.flow_warp(rv.img, flow=flow, blur=rv.init_flow_blur, strength=rv.init_flow_strength, exponent=1)
-    hud.snap("init_flow_warped", rv.img)
 
 
 def do_dynamic_flow():
@@ -490,13 +315,12 @@ def do_dynamic_flow():
         if dirpath:
             tricks.precompute_flows(flowpath)
 
-
     change = dynflow.current_flow is None or \
              dynflow.current_flow_pos >= dynflow.current_flow_len or \
              rv.flow_changes > 0.5
 
     if change:
-        indices = np.linspace(0, len(rv.flows)-1, len(rv.flows))
+        indices = np.linspace(0, len(rv.flows) - 1, len(rv.flows))
         dynflow.current_flow_pos = 0
         dynflow.current_flow_index = int(choose(indices.tolist(), exclude=dynflow.current_flow_index))
         dynflow.current_flow = rv.flows[dynflow.current_flow_index]
@@ -559,82 +383,58 @@ def sacade(amp=1):
     rv.ry += nprng(-amp, amp)
     rv.rz += nprng(-amp, amp)
 
-def dtcam():
-    rv.dtcam = rv.zero()
-    rv.dtcam = np.maximum(rv.dtcam, abs(rv.x) / 30)
-    rv.dtcam = np.maximum(rv.dtcam, abs(rv.y) / 30)
-    rv.dtcam = np.maximum(rv.dtcam, abs(rv.z) / 60)
-    rv.dtcam = np.maximum(rv.dtcam, abs(rv.flower) / 4)
+
+def dtcam(xy=30, z=40, flower=2):
+    rv.dtcam = rv.zeros()
+    rv.dtcam = np.maximum(rv.dtcam, abs(rv.x) / xy)
+    rv.dtcam = np.maximum(rv.dtcam, abs(rv.y) / xy)
+    rv.dtcam = np.maximum(rv.dtcam, abs(rv.z) / z)
+    rv.dtcam = np.maximum(rv.dtcam, abs(rv.flower) / flower)
     rv.dtcam = np.clip(rv.dtcam, 0, 1)
+
 
 @trace_decorator
 def colors():
     hsv = cv2.cvtColor(rv.img, cv2.COLOR_RGB2HSV)
     printdic = {}
 
-    if rv.hue > eps:
+    if rv.has_signal('hue'):
         hsv = tricks.hue(hsv, rv.hue)
         printdic['hue'] = rv.hue
-    if rv.saturation > eps:
+    if rv.has_signal('saturation'):
         hsv = tricks.saturation(hsv, rv.saturation)
         printdic['saturation'] = rv.saturation
-    if rv.brightness > eps:
+    if rv.has_signal('brightness'):
         hsv = tricks.brightness(hsv, rv.brightness)
         printdic['brightness'] = rv.brightness
 
     rv.img = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-    # rv.img = tricks.do_histogram_norm(rv.img)
+    # if rv.f % 5 == 0:
+    #     rv.img = tricks.do_histogram_norm(rv.img)
     # rv.img = tricks.do_histogram_stretch(rv.img)
 
     hud.hud(**printdic)
-    if rv.contrast > eps:
+    if rv.has_signal('contrast') and rv.contrast > eps:
         tricks.contrast(rv.img, rv.contrast)
         printdic['contrast'] = rv.contrast
 
+
 last_depth = None
-last_depth_tensor = None
+
 
 @trace_decorator
 def rv_depth():
-    global last_depth, last_depth_tensor
-    midas = plugins.get('midas3d')
-    if rv.f % 2 == 0 or last_depth is None:
-        depth, tensor = midas.get_depth(rv.img)
+    global last_depth
+    log("rv_depth")
+    if rv.f % 1 == 0 or last_depth is None:  #
+        depth = tricks.get_depth(rv.img)
         last_depth = depth
-        last_depth_tensor = tensor
-        # last_depth = depth = tricks.get_depth(rv.img)
     else:
         depth = last_depth
-        tensor = last_depth_tensor
 
-    # print("----------------------------------------")
-    # print("DEPTH TENSOR")
-    # print(tensor)
-    # print("")
-    # print(tensor.shape)
-    # print(tensor.dtype, tensor.min(), tensor.max())
-    # print("----------------------------------------")
-    # print("DEPTH")
-    # print(depth)
-    # print("")
-    # print(depth.shape)
-    # print(depth.dtype, depth.min(), depth.max())
-    # print("----------------------------------------")
-    # print("NEWDEPTH")
-    # print(newdepth)
-    # print("")
-    # print(newdepth.shape)
-    # print(newdepth.dtype, newdepth.min(), newdepth.max())
-    # print("----------------------------------------")
-
-    # print(depth.shape)
-    # print(midas.get_depth(rv.img)[1].shape)
-    # depth_inv = ImageOps.invert(convert.cv2pil(depth))
-    # depth_inv = pil2cv(depth_inv)
-    # depth_tensor = depth_inv
     rv.depth = depth
-    rv.depth_tensor = tensor
-    return depth, tensor
+    return depth
+
 
 def set_prev_spike(signal, distance=1):
     rv.cur_spike_index = rv.f
@@ -651,8 +451,10 @@ def set_prev_spike(signal, distance=1):
                 rv.spike_distance = rv.cur_spike_index - rv.prev_spike_index
                 break
 
+
 def is_flowr_switch():
     return tricks.schedule_01(rv.flower_switch) == 1
+
 
 def react_flowr(signals, lo=1, hi=3.5):
     a, b, c = 0, 0, 0
@@ -668,16 +470,18 @@ def react_flowr(signals, lo=1, hi=3.5):
 
     rv.flowr = a * jc(S[0]) + b * S[1] + c * jc(rv.vr_dt)
 
+
 def react_zoom(signals, lo=10, hi=25, freq=(.03, 0.15)):
     S = choices(signals, n=4)
 
     freq = rng(*freq)
-    a,b,c = get_rand_sum(3, lo, hi)
+    a, b, c = get_rand_sum(3, lo, hi)
 
     rv.z += a * S[0] * perlin01(freq) + S[1] * b * S[2] + c * blur(S[3], 1)
     rv.z *= 0.5
 
     dtcam()
+
 
 def react_xy(signals, lo=5, hi=10):
     S = choices(signals, n=2)
@@ -685,13 +489,17 @@ def react_xy(signals, lo=5, hi=10):
 
     rv.x += perlin01(0.08, -x, x) * S[0]
     rv.y += perlin01(0.1, -y, y) * jc(S[1])
-    # rv.y += 10 * pdiff(rv.amp1)
+
+
+# rv.y += 10 * pdiff(rv.amp1)
+
 
 def react_sacade(signals, lo=0.5, hi=1.5):
     S = choices(signals)
-    a,b,c = get_rand_sum(3, lo, hi)
+    a, b, c = get_rand_sum(3, lo, hi)
 
     sacade(a + rv.dtcam + b * S[0] + c * rv.vr_dt)
+
 
 def react_smooth_rot(signals, lo=0, hi=30):
     S = choices(signals)
@@ -699,19 +507,20 @@ def react_smooth_rot(signals, lo=0, hi=30):
 
     rv.rz = a * perlin11(.06) * S[0]
 
+
 @trace_decorator
 def react_rxy(signals, lo=0, hi=1):
     S = choices(signals, n=2)
-    a,b = get_rand_sum(2, lo, hi)
+    a, b = get_rand_sum(2, lo, hi)
 
     rv.rx = a * perlin11() * S[0]
     rv.ry = b * perlin11() * 1 - S[1]
+
 
 def react_hue_pca(signals, lo=0, hi=0.25):
     S = choices(signals)
     a = rng(lo, hi)
     rv.hue = a * jc(S[0], rng(0.33, 0.66))
-
 
 
 def react_chg(lo=0.55, hi=0.685):
@@ -727,7 +536,7 @@ def react_chg(lo=0.55, hi=0.685):
     # rv.ccg1 += lerp(0.5, 0, rcurve(rv.amp1))
     rv.ccg1 -= 0.235 * rv.spk2
     rv.ccg1 -= 0.500 * jcurve(rv.onset, 0.4)
-    rv.ccg1 *= 1 - norm(jcurve(rv.drum_onset, 0.75, 24*8)) # strong spikes
+    rv.ccg1 *= 1 - norm(jcurve(rv.drum_onset, 0.75, 24 * 8))  # strong spikes
 
     rv.ccg2 = b - 0.05 * S[0]
     rv.ccg2 -= schedule([0, 0, 0, 0, 0, 0.1])
@@ -763,7 +572,7 @@ def react_chg(lo=0.55, hi=0.685):
     rv.chg += rv.chapter_changes * rv.onset
     rv.chg = clamp(rv.chg, 0.02, 1)
 
-    rv.render_switch = 0.85 #max(lerp(0.3, 0.4, rc(rv.dtcam)), lerp(0.3, 0.4, rc(rv.flowr / 2)))
+    rv.render_switch = 0.85  # max(lerp(0.3, 0.4, rc(rv.dtcam)), lerp(0.3, 0.4, rc(rv.flowr / 2)))
 
 
 def react_base():
@@ -786,14 +595,14 @@ def react_base():
 def react_composite():
     # Create the final composite between multiple sets using the binary chapter signal
 
-    rv.set_signal_set('base')
+    rv.select_gsignal('base')
     indices = np.where(rv.chapters > 0.5)[0]
     if indices[0] != 0:
         indices = np.insert(indices, 0, 0)
 
     for i, i2 in zip(indices, indices[1:]):
-        rv.set_signal_set('chapter')
-        rv.copy_set('base')
+        rv.select_gsignal('chapter')
+        rv.copy_gsignal('base')
 
         signals = [rv.amp1, rv.amp2, rv.amp3, rv.amp4, rv.spk, rv.spk2, rv.pca1, rv.drum_onset, rv.onset]  # rv.music, rv.vocals, rv.drums,
         react_chg()
@@ -811,6 +620,437 @@ def react_composite():
         else:
             react_zoom([rv.amp1, rv.amp2, rv.amp3, rv.pca1, rv.pca2], 75, 150)
 
-        rv.copy_set_frames('chapter', 'composite', i, i2)
+        rv.copy_gframes('chapter', 'composite', i, i2)
 
-    rv.set_signal_set('composite')
+    rv.select_gsignal('composite')
+
+
+def apply():
+    flower = plugins.get('flower')
+    colors()
+    tricks.mat2d(rv.img, x=rv.x, y=rv.y, z=rv.z, rx=rv.rx, ry=rv.ry, rz=rv.rz)
+    rv.img = flower.flow(rv.img, rv.flower)
+
+
+@trace_decorator
+def render_switch(
+        fn_guidance: Optional[Callable] = None,
+        fn_detail: Optional[Callable] = None,
+        after_cn: Optional[Callable] = None,
+        txt2img: Optional[Callable] = None,
+        img2img: Optional[Callable] = None,
+        preserve_palette: bool = False,
+        shade_depth: bool = True
+) -> None:
+    """
+    A controllable render process which alternates between txt2img and img2img without controlnet.
+    This allows the imagery to organically move between two different composition spaces, latent and physical.
+    img2img can be more subtle as well, which tempers the animation and makes it less jittery.
+    """
+    global last_seed, seed_frames_elapsed
+
+    if rv['skip_diffusion'] > 0.5:
+        return
+
+    # Validate and set defaults
+    if txt2img is None or img2img is None:
+        diffusers = plugins.get('sd_diffusers')
+        if txt2img is None:
+            logerr("DEPRECATED use of render_switch, please set txt2img argument to specify how to render")
+            txt2img = diffusers.txt2img_cn
+        if img2img is None:
+            logerr("DEPRECATED use of render_switch, please set img2img argument to specify how to render")
+            img2img = diffusers.img2img_cn
+
+    # Prepare arguments
+    args = {
+        'rv': rv,
+        'prompt': rv.prompt, 'promptneg': rv.promptneg,
+        'seed': rv.nextseed,
+        'steps': rv.steps,
+        'w': rv.w, 'h': rv.h,
+        'chg': rv.chg,
+        'cfg': rv.cfg,
+        'sampler': rv.sampler,
+        'img': rv.img,
+        'image': rv.img,
+        'seed_grain': rv['seed_grain'],
+        # 'seed_grain': rv.cn_chg,
+        'guidance': None,
+        'ccg': None,
+    }
+
+    fn_guidance = fn_guidance or get_guidance
+
+    is_cn_switch = tricks.schedule_01(rv['cn_switch'], hudname='cn_render')
+    is_cn_img2img = tricks.schedule_01(rv['i2i_switch'], hudname='i2i')
+
+    if rv.f <= 1:
+        rv.chg = 1
+        rv.force_cn = 1
+
+    if is_cn_switch or rv['force_cn'] > 0.5:
+        # Process CN switch
+        if fn_detail is not None:
+            rv.img = fn_detail()
+
+        guidance = fn_guidance()
+        args['guidance'] = guidance
+        args['ccg'] = get_ccgs(len(guidance))[0]
+        rv.img = txt2img(**args)
+
+        if after_cn is not None:
+            after_cn()
+
+        # Post-process
+        if preserve_palette > 0:
+            cc = tricks.palette(rv, rv.img, rv.cn_img2)
+            rv.img = tricks.alpha_blend(rv.img, cc, lerp(0.845, 0.5, rv.dtcam))
+
+        if shade_depth:
+            tricks.shade_depth()
+    else:
+        # Process img2img
+        rv.seed = rv.nextseed
+        rv.img = img2img(**args)
+
+
+# @trace_decorator
+# def render_switch(fn_guidance=None,
+#                   fn_detail=None,
+#                   after_cn=None,
+#                   txt2img=None,
+#                   img2img=None,
+#                   preserve_palette=False,
+#
+#                   shade_depth=True):
+#     """
+#     A controllable render process which alternates between txt2img and img2img without controlnet.
+#     This allows the imagery to organically move between two different composition space, latent and physical.
+#     img2img can be more subtle as well, which tempers the animation and makes it less jittery.
+#     """
+#     global last_seed, seed_frames_elapsed
+#
+#     if rv.skip_diffusion:
+#         return
+#
+#
+#     if txt2img is None:
+#         logerr("DEPRECATED use of render_switch, please set txt2img argument to specify how to render")
+#         diffusers = plugins.get('sd_diffusers')
+#         rv.img = diffusers.txt2img_cn
+#     if img2img is None:
+#         logerr("DEPRECATED use of render_switch, please set img2img argument to specify how to render")
+#         diffusers = plugins.get('sd_diffusers')
+#         rv.img = diffusers.img2img_cn
+#
+#     args = dict(
+#         rv=rv,
+#         prompt=rv.prompt, promptneg=rv.promptneg,
+#         seed=rv.seed,
+#         steps=rv.steps,
+#         w=rv.w, h=rv.h,
+#         chg=rv.chg,
+#         cfg=rv.cfg,
+#         sampler=rv.sampler,
+#         image=rv.img,
+#         seed_grain=rv.seed_grain,
+#         guidance=None,
+#         ccg=None,
+#     )
+#
+#     fn_guidance = fn_guidance or get_guidance
+#
+#     is_cn_switch = tricks.schedule_01(rv.cn_switch, hudname='cn_render')
+#     is_cn_img2img = tricks.schedule_01(rv.i2i_switch, hudname='i2i')
+#     if is_cn_switch or rv.force_cn > 0.5:
+#         if fn_detail is not None:
+#             rv.img = fn_detail()
+#
+#
+#         args['guidance'] = fn_guidance()  # OBSOLETE
+#         args['ccg'], = get_ccgs()  # OBSOLETE
+#         args['seed_grain'] = rv.cn_chg  # OBSOLETE
+#         rv.img = txt2img(**args)
+#
+#         if after_cn is not None:
+#             after_cn()
+#
+#         # POST-PROCESS
+#         if preserve_palette > 0:
+#             cc = tricks.palette(rv, rv.img, rv.cn_img2)
+#             rv.img = tricks.alpha_blend(rv.img, cc, lerp(0.845, 0.5, rv.dtcam))
+#
+#         if shade_depth:
+#             tricks.shade_depth()
+#     else:
+#         rv.seed = rv.nextseed
+#         rv.img = img2img(**args)
+
+
+def get_guidance(*types: str) -> List[np.ndarray]:
+    if not types:
+        types = ['hed', 'temporal', 'depth']
+
+    def apply_image_transformations(img: np.ndarray) -> np.ndarray:
+        if rv.has_signal('init_contrast'):
+            img = tricks.contrast(img, rv.init_contrast)
+        if rv.has_signal('init_blur'):
+            img = tricks.get_blurred(img, rv.init_blur)
+        if any(rv.has_signal(f'init_{axis}') for axis in 'xyz'):
+            img = tricks.mat2d(img, x=rv.init_x, y=rv.init_y, z=rv.init_z, r=rv.init_r)
+        return img
+
+    def get_init_anchor() -> Tuple[float, float]:
+        init_anchor = (.5, .5)
+        if rv.has_signal('init_anchor_x'):
+            init_anchor = (rv.init_anchor_x, init_anchor[1])
+        if rv.has_signal('init_anchor_y'):
+            init_anchor = (init_anchor[0], rv.init_anchor_y)
+        return init_anchor
+
+    def apply_depth_mode(img: np.ndarray, type_: str, depth_map: Optional[np.ndarray], depth_result: Optional[np.ndarray]) -> np.ndarray:
+        if type_.endswith(('*depth', '*depth_result')):
+            depth_to_use = depth_result if type_.endswith('*depth_result') else depth_map
+            img = np.clip(img * rc(depth_to_use / 255, 0.75), 0, 255).astype(np.uint8)
+        return img
+
+    def process_canny(cn_img: np.ndarray) -> np.ndarray:
+        canny_src = tricks.alpha_blend(rv.img, cn_img, rv['iccg1'])
+        return tricks.img_to_canny(canny_src, rv.canny_lo, rv.canny_hi)
+
+    def process_hed(cn_img: np.ndarray) -> np.ndarray:
+        hed_src = tricks.alpha_blend(rv.img, cn_img, rv['iccg1'])
+        return tricks.img_to_misto(hed_src)
+
+    def process_temporal(cn_img: np.ndarray) -> np.ndarray:
+        temporal_src = rv.img
+        if cn_img is not None:
+            temporal_src = tricks.alpha_blend(temporal_src, cn_img, rv['iccg2'])
+        return temporal_src
+
+    def process_depth(cn_img: np.ndarray) -> np.ndarray:
+        if rv.init_img is None:
+            cn_img_depth = rv.depth
+        else:
+            init_depth = tricks.get_depth(rv.init_img)
+            cn_img_depth = tricks.alpha_blend(rv.depth, init_depth, rv['iccg3'])
+
+        if rv.has_signal('ground'):
+            perp = tricks.get_yperp_mask() + cv2.flip(tricks.get_yperp_mask(), 0)
+            guidance_img3_ground = tricks.alpha_blend(cn_img_depth, perp, rv.ground)
+            ground_clip_plane = 0.5 * 255
+            cn_img_depth[cn_img_depth < ground_clip_plane] = guidance_img3_ground[cn_img_depth < ground_clip_plane]
+
+        return cn_img_depth
+
+    cn_img = next((img for img in (rv['cn_img'], rv['init_img'], rv['img']) if img is not None), None)
+
+    if cn_img is not None:
+        cn_img = apply_image_transformations(cn_img)
+
+    hud.snap('cn_img', cn_img)
+
+    init_anchor = get_init_anchor()
+
+    priorities = {
+        'canny': 0, 'hed': 1, 'hed*depth': 2, 'temporal': 3, 'depth': 4,
+    }
+    types = sorted(types, key=lambda t: priorities[t])
+
+    depth_map, depth_result = None, None
+
+    processors = {
+        'canny': process_canny,
+        'hed': process_hed,
+        'temporal': process_temporal,
+        'depth': process_depth
+    }
+
+    ret = []
+    for type_ in types:
+        base_type = type_.split('*')[0]
+        img = processors[base_type](cn_img)
+        img = apply_depth_mode(img, type_, depth_map, depth_result)
+        ret.append(img)
+
+    for i, img in enumerate(ret, 1):
+        hud.snap(f'guidance_{i}', img)
+
+    return ret
+
+
+@trace_decorator_noargs
+def get_ccgs(n, apply_seed_change_attenuation=False, outputs='ccg', print_hud=False):
+    if isinstance(outputs, str):
+        outputs = [outputs]
+    output_lists = [[] for _ in range(len(outputs))]
+
+    global last_seed, seed_frames_elapsed
+    if last_seed != rv.seed:
+        last_seed = rv.seed
+        seed_frames_elapsed = 0
+    else:
+        seed_frames_elapsed += rv.dt
+
+    for i in range(n):
+        i += 1
+        key_ccg = f'ccg{i}'
+        key_ccg_a = f'ccg{i}_a'
+        key_ccg_b = f'ccg{i}_b'
+        key_img = f'ccg{i}_img'
+        key_ccg_atten = f'seed_atten_ccg{i}'
+        key_iccg = f'iccg{i}'
+
+        # Valid values for outputs
+        img = rv[key_img]
+        ccg = rv[key_ccg]
+        ccga = rv[key_ccg_a]
+        ccgb = rv[key_ccg_b]
+        ccg_atten = rv[key_ccg_atten]
+        iccg = rv[key_iccg]
+
+        if apply_seed_change_attenuation and rv.seed_atten_time > 0:
+            ccg += lerp(ccg_atten, 0, seed_frames_elapsed / rv.seed_atten_time * rv.fps)
+
+        if print_hud:
+            hud.snap(f'ccg{i}_img', img)
+            hud.hud(**{
+                key_ccg: ccg,
+                key_ccg_a: ccga,
+                key_ccg_b: ccgb,
+                key_iccg: iccg,
+                key_ccg_atten: ccg_atten,
+            })
+
+        for j, output in enumerate(outputs):
+            output_lists[j].append(locals()[output])
+
+    return output_lists
+
+
+@trace_decorator_noargs
+def txt2img_cn_dev(self, *args, **kwargs):
+    hud(chg=kwargs.get('chg'), cfg=kwargs.get('cfg'), ccg=kwargs.get('ccg'), seed=kwargs.get('seed'))
+    if 'image' in kwargs:
+        img = tricks.grain(rv, strength=kwargs['chg'])
+        img = tricks.saltpepper(rv, coverage=kwargs['chg'] * 0.04)
+        return img
+    else:
+        # random color
+        img = np.random.randint(0, 255, (512, 512, 3), dtype=np.uint8)
+        img = tricks.saltpepper(rv, coverage=kwargs['chg'] * 0.04)
+        return img
+
+
+@trace_decorator_noargs
+def txt2img_dev(self, *args, **kwargs):
+    hud(chg=kwargs.get('chg'), cfg=kwargs.get('cfg'), ccg=kwargs.get('ccg'), seed=kwargs.get('seed'))
+    img = np.random.randint(0, 255, (512, 512, 3), dtype=np.uint8)
+    img = tricks.saltpepper(rv, coverage=kwargs['chg'] * 0.04)
+    return img
+
+
+@trace_decorator_noargs
+def img2img_dev(self, *args, **kwargs):
+    hud(chg=kwargs.get('chg'), cfg=kwargs.get('cfg'), ccg=kwargs.get('ccg'), seed=kwargs.get('seed'))
+    img = tricks.grain(rv, strength=kwargs['chg'])
+    img = tricks.saltpepper(rv, coverage=kwargs['chg'] * 0.04)
+    return img
+
+
+def get_cn_guidance(edge_type=None):
+    midas = plugins.get('midas')
+
+    guidance_img1 = rv.img
+    guidance_img2 = rv.img
+    guidance_img3 = rv.depth  # tricks.get_depth(rv.img)
+
+    # convert.save_img(depth_better, session.res('guidance_3_better.jpg'))
+    # guidance_img3 = tricks.get_depth(rv.img)
+
+    # This will make the colors bleed all over the place
+    # while ccg1 preserves the composition
+    # cool as fuck
+    # guidance_img2 = midas.mat3d(
+    #         z=25 * jcurve(rv.amp, rv.curved_sharpness) + 30 * jcurve(rv.spk2, 0.5),
+    #         far=20000,
+    #         fov=82.5,
+    #         w_midas=2.2,
+    #         sampling_mode='nearest')
+
+    # Either init image or cn_img
+    init_anchor = (.5, .5)
+    if rv.has_signal('init_anchor_x'): init_anchor = (rv.init_anchor_x, init_anchor[1])
+    if rv.has_signal('init_anchor_y'): init_anchor = (init_anchor[0], rv.init_anchor_y)
+    cn_img = first_non_null(rv.cn_img, rv.init_img, rv.img)
+
+    # cn_img = tricks.load_cv2(cn_img)
+    if rv.has_signal('init_contrast'):
+        # cn_img = tricks.do_histogram_norm(cn_img)
+        # cn_img = tricks.do_histogram_stretch(cn_img)
+        # cn_img = tricks.selective_contrast_enhancement(cn_img, 0.3, 0.75) #dbg.v1, dbg.v2)
+        cn_img = tricks.contrast(cn_img, rv.init_contrast)
+
+    if rv.has_signal('init_blur'):
+        cn_img = tricks.get_blurred(cn_img, rv.init_blur)
+
+    # Horizontal duplication
+    # d = 20
+    # cn_imgl = cn_img
+    # cn_imgl = tricks.mat2d(cn_imgl, x=-d, y=0)
+    # cn_imgr = cn_img
+    # cn_imgr = tricks.mat2d(cn_imgr, x=d, y=0)
+    # cn_img = tricks.alpha_blend(cn_img, cn_imgl, 0.5)
+    # cn_img = tricks.alpha_blend(cn_img, cn_imgr, 0.5)
+
+    cn_img = tricks.mat2d(cn_img, x=rv.init_x, y=rv.init_y, z=rv.init_z)
+
+    # cn_img = tricks.do_canny_edge_reinforce(cn_img, 0.025, 0.01)
+
+    # Inject the cn_img
+    if cn_img is not None:
+        # cn_img_flow = tricks.res_flow_cv2('init')
+        # flow_mask = tricks.get_flow_mask()
+
+        # depth_img = rv.depth
+        # if not isinstance(depth_img, np.ndarray):
+        #     depth_img = tricks.get_depth(rv.init_img)
+
+        guidance_img1 = tricks.alpha_blend(guidance_img1, cn_img, rv['iccg1'])
+        guidance_img2 = tricks.alpha_blend(guidance_img2, cn_img, rv['iccg2'])
+        guidance_img3 = tricks.alpha_blend(guidance_img3, tricks.get_depth(cn_img), rv['iccg3'])
+        # depth_better = tricks.get_depth(cn_img)
+
+        if renderer.enable_dev:
+            rv.img = cn_img
+
+    # Inject perspective depth
+    perp = tricks.get_yperp_mask() + cv2.flip(tricks.get_yperp_mask(), 0)
+    guidance_img3_ground = tricks.alpha_blend(guidance_img3, perp, rv.ground)
+    ground_clip_plane = 0.5 * 255
+    guidance_img3[guidance_img3 < ground_clip_plane] = guidance_img3_ground[guidance_img3 < ground_clip_plane]
+
+    # TODO autodetect
+    if edge_type == 'hed':
+        guidance_img1 = tricks.img_to_hed(guidance_img1)
+        # Use CV2 to sharpen guidance_img2 with convolutions
+        guidance_img1 = cv2.detailEnhance(guidance_img1, sigma_s=10, sigma_r=0.15)
+    # Multiply with guidance_img3 which is depth
+    # guidance_img1 = guidance_img1 * rc(guidance_img3/255, 0.75)
+    # guidance_img1 = np.clip(guidance_img1, 0, 255)
+    # guidance_img1 = guidance_img1.astype(np.uint8)
+    elif edge_type == 'canny':
+        guidance_img1 = tricks.img_to_canny(guidance_img1, rv.canny_lo, rv.canny_hi)
+
+    # Multiply with guidance_img3 which is depth
+    # guidance_img2 = guidance_img2 * rc(guidance_img3/255, 0.75)
+    # guidance_img2 = np.clip(guidance_img2, 0, 255)
+    # guidance_img2 = guidance_img2.astype(np.uint8)
+
+    # img_bw = cv2.cvtColor(guidance_img1, cv2.COLOR_BGR2GRAY)
+    # img_bw = np.expand_dims(img_bw, axis=2)
+    # img_bw = np.concatenate((img_bw, img_bw, img_bw), axis=2)
+    # guidance_img1 = tricks.alpha_blend(img_bw, guidance_img1, 0.5)
+
+    return guidance_img1, guidance_img2, guidance_img3

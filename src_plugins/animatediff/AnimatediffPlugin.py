@@ -79,7 +79,8 @@ class AnimatediffPlugin(Plugin):
                 steps=25,
                 cfg=7,
                 seed=-1,
-                n=16):
+                n=16,
+                ctx=16):
         rv = renderer.rv
 
         if seed != -1:
@@ -89,7 +90,6 @@ class AnimatediffPlugin(Plugin):
 
         batches_result = self.pipeline(
             prompt,
-            temporal_context_length=n,
             init_images=images,
             negative_prompt=nprompt,
             num_inference_steps=steps,
@@ -97,6 +97,9 @@ class AnimatediffPlugin(Plugin):
             width=rv.w,
             height=rv.h,
             video_length=n,
+            temporal_context=ctx,
+            strides=1,
+            overlap=5
         ).videos
 
         import einops

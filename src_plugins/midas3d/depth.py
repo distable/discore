@@ -7,12 +7,12 @@ import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 from torchvision import transforms
+from torchvision.io import write_png
 
 from src.lib import devices
 from .infer import InferenceHelper
 from .adabins import UnetAdaptiveBins
 
-from numpngw import write_png
 
 from einops import rearrange, repeat
 from PIL import Image
@@ -237,7 +237,7 @@ class DepthModel:
         temp_image = rearrange((depth - self.depth_min) / denom * denom_bitdepth_multiplier[bit_depth_output], 'c h w -> h w c')
         temp_image = repeat(temp_image, 'h w 1 -> h w c', c=3)
         if bit_depth_output == 16:
-            write_png(filename, temp_image.astype(np.uint16))
+            cv2.imwrite(filename, temp_image.astype(np.uint16))
         elif bit_depth_output == 32:
             os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
             cv2.imwrite(filename.replace(".png", ".exr"), temp_image)

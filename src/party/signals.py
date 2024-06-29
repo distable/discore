@@ -5,7 +5,7 @@ from collections.abc import Iterable
 # from scipy.signal import decimate
 
 # Assign these
-from src.lib.printlib import trace_decorator
+from src.lib.loglib import trace_decorator
 from src.party.maths import *
 
 

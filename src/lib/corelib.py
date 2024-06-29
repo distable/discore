@@ -1,5 +1,6 @@
 import os
 import subprocess
+import uuid
 from colorsys import hsv_to_rgb
 from pathlib import Path
 import time
@@ -34,7 +35,7 @@ def open_in_explorer(path):
         raise Exception(f"open_in_explorer: Unsupported OS '{os.name}' ")
 
 
-def shlexrun(cmd, print_cmd=True, shell=False, **kwargs):
+def shlexrun(cmd, print_cmd=True, shell=False, silent=False, **kwargs):
     import shlex
     import subprocess
 
@@ -47,6 +48,10 @@ def shlexrun(cmd, print_cmd=True, shell=False, **kwargs):
     if print_cmd:
         from yachalk import chalk
         print(chalk.grey(f"> {cmd_str}"))
+
+    if silent:
+        # kwargs['stderr'] = subprocess.DEVNULL
+        kwargs['stdout'] = subprocess.DEVNULL
 
     proc = subprocess.Popen(cmd, shell=shell, **kwargs)
     proc.wait()
@@ -86,7 +91,7 @@ def invoke_safe(func, *kargs, failsleep=0.0, unsafe=False, **kwargs):
             return True
 
         try:
-            from src.lib.printlib import trace
+            from src.lib.loglib import trace
             with trace(f"invoke_safe({func.__name__ if hasattr(func, '__name__') else func.__class__.__name__})"):
                 func(*kargs, **kwargs)
             return True
@@ -101,3 +106,7 @@ def invoke_safe(func, *kargs, failsleep=0.0, unsafe=False, **kwargs):
 def has_exe(name):
     ret = subprocess.call(['git', '--version'])
     return ret == 0
+
+
+def make_short_guid():
+    return str(uuid.uuid4())[:8]

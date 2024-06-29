@@ -6,7 +6,7 @@ import os
 
 from yachalk import chalk
 
-from src.lib.printlib import print_cmd
+from src.lib.loglib import print_cmd
 
 
 def sshexec(ssh, cmd, with_printing=True):

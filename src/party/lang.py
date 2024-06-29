@@ -1,7 +1,12 @@
-from src import renderer
-from src.party import maths, pnodes
 from src.party.maths import scurve
-from src.party.pnodes import eval_prompt, PGlobals, PList, PProp
+from src.party.ravelang.PProp import PProp
+from src.party.ravelang.PGlobals import PGlobals
+from src.party.ravelang.PList import PList
+
+# ----------------------------------------
+# DEPRECATION NOTICE
+# this is just an old semantic palette file
+# ----------------------------------------
 
 shape = PList('''
 spirals
@@ -102,7 +107,7 @@ scenic = PList("scenic wide-shot cinematic beautiful vast empty clear overhead d
 scene = PList("meadow valley river mountain forest lake ocean beach desert reef canyon cave")
 # Vague composition landmarks
 thing = PList("slope valley corner surface edge horizon object background")
-layer = PList("background foreground middle ground sky horizon")
+layer = PList("background; foreground; sky; horizon")
 through = PList("through into from above below across around over under")
 # A wild variety of exotic flowers
 flower = PList("dahlia rose tulip daisy orchid lily sunflower poppy iris carnation marigold aster begonia geranium")
@@ -130,51 +135,51 @@ flowers; lavender flowers; coral ornaments; autumn leaves; tree bark texture; hu
 illuminati aesthetic; depth of field; triangle; potpourri; vogue magazine aesthetic; brushery; clouds; orchid flowers;
 fern leaves; glowing; made of broken glass; broken mirror;
 """)
-magic = PList("whimsical magical cursed haunted horrific fantastical surreal")
+magic = PList("magical cursed haunted fantastical surreal")
 bgcolor = PList("black dark candlelit obsidian coal nighttime twilight charcoal midnight ink shadow raven jet ebony onyx soot tar pitch")
 root = PGlobals(
-        # bloom=ProportionSet(bloom, 1, 0.5, 0, 1, scale=5),
-        # chromatic=SequenceSet(chromatic, scale=1.85),
-        # scenes=ProportionSet(scenes, 100, [0.5, 0.6], [0.1, 0.12], 0.75, scale=4),
-        # everything=ProportionSet(everything, 1, [0.1, 0.5], 0, 1, scale=2.8),
+    # bloom=ProportionSet(bloom, 1, 0.5, 0, 1, scale=5),
+    # chromatic=SequenceSet(chromatic, scale=1.85),
+    # scenes=ProportionSet(scenes, 100, [0.5, 0.6], [0.1, 0.12], 0.75, scale=4),
+    # everything=ProportionSet(everything, 1, [0.1, 0.5], 0, 1, scale=2.8),
 
-        # colors1=ProportionSet(colors1, 7.5, 0.5, (0, 1), 2.5),
+    # colors1=ProportionSet(colors1, 7.5, 0.5, (0, 1), 2.5),
 
-        # colors2 = ProportionSet(colors2, 10, 0.5,  0, 1)
-        # objects=ProportionSet(objects, 10, 0.125, [0.3, 0.25], 0.25, scale=1.5),
-        # rendering = ProportionSet(rendering,  7.5, [0.95, 0.985],  [0.01, 0.25], 1),
-        # ["5.75*+cos1(t,0.5,5)", objects],
-        # ["cos1(t,1+cos1(t,.5,.5),0.85)", d2],
+    # colors2 = ProportionSet(colors2, 10, 0.5,  0, 1)
+    # objects=ProportionSet(objects, 10, 0.125, [0.3, 0.25], 0.25, scale=1.5),
+    # rendering = ProportionSet(rendering,  7.5, [0.95, 0.985],  [0.01, 0.25], 1),
+    # ["5.75*+cos1(t,0.5,5)", objects],
+    # ["cos1(t,1+cos1(t,.5,.5),0.85)", d2],
 )
 
-s1 = PProp(shape, 9, (0.5, 0.6), (0.1, 0.22), 0.5, scale=1.85)
-s2 = PProp(shape, 6, (0.5, 0.6), (0.1, 0.22), 0.5, scale=1.85)
-s3 = PProp(artist, 5, (0.9, 0.985), (0.01, 0.1), 1, scale=1)
-s4 = PProp(textures, width=1.5, p=(0.4, 0.25), drift=.7, lerp=1, scale=1)
-s5 = PProp(fog, width=0.5, p=0.1, drift=0.3, lerp=1, curve=scurve, scale=2)
-s6 = PProp(fog, width=0.1, p=0.1, drift=0.3, lerp=1, curve=scurve, scale=2)
-s7 = PProp(fog, width=0.1, p=0, drift=0, lerp=0, curve=scurve, scale=2)
+s1 = PProp(shape, width=9, p=(0.4, 0.6), drift=(0.1, 0.4), lerp=0.5)
+s2 = PProp(shape, width=6, p=(0.5, 0.65), drift=(0.1, 0.3), lerp=0.5)
+s3 = PProp(artist, width=5, p=(0.3, 0.55), drift=(0.01, 0.3), lerp=1)
+s4 = PProp(textures, width=1.5, p=(0.3, 0.65), drift=(0.0, 0.7), lerp=0.5)
+s5 = PProp(fog, width=0.5, p=0.395, drift=(0.1, 0.7), lerp=0.1, curve=scurve)
+s6 = PProp(fog, width=0.3, p=0.350, drift=(0.1, 0.3), lerp=0.1, curve=scurve)
+s7 = PProp(fog, width=0.1, p=0.33333, drift=(0.1, 0.3), lerp=0.1, curve=scurve)
 confmap = {
-    'scenic'    : s5,
-    'texture'   : [s5, s4],
-    'artist'    : [s5, s4, s3],
-    'shape'     : [s5, s4],
-    'beauty'    : [s5, s4, s3],
-    'scene'     : [s5],
-    'colors'    : [s5, s4, s3, s2],
-    'intensity' : [s5, s4, s3, s2],
-    'through'   : [s5, s4, s3],
-    'layer'     : [s5, s4, s3],
-    'flower'    : [s3, s2],
-    'motion'    : [s3],
-    '*'         : [s5],
+    'scenic': s5,
+    'texture': [s5, s4],
+    'artist': [s5, s4, s3],
+    'shape': [s5, s4],
+    'beauty': [s5, s4, s3],
+    'scene': [s5],
+    'colors': [s5, s4, s3, s2],
+    'intensity': [s5, s4, s3, s2],
+    'through': [s5, s4, s3],
+    'layer': [s5, s4, s3],
+    'flower': [s3, s2],
+    'motion': [s3],
+    '*': [s5],
     # ----------------------------------------
-    'n_gem'     : s5,
-    'a_gem'     : s5,
-    'a_gem2'    : s5,
-    'a_cave'    : s4,
-    'a_shape'   : s5,
-    'a_light'   : s3,
+    'n_gem': s5,
+    'a_gem': s5,
+    'a_gem2': s5,
+    'a_cave': s4,
+    'a_shape': s5,
+    'a_light': s3,
     'a_penumbra': s2,
 }
 
@@ -191,7 +196,6 @@ a_penumbra = PList("shadow darkness twilight dimness obscurity shade gloom murki
 # nnprompt: node root
 # nprompt_last: last node prompt
 # prompt: resolved prompt for this frame, to use in img2img
-
 
 
 # artist = PromptWo

@@ -1,6 +1,8 @@
 from pnodes import *
 
-from src.party.pnodes import bake, PNode, PProp
+from src.party.ravelang.pnodes import bake
+from src.party.ravelang.PProp import PProp
+from src.party.ravelang.PNode import PNode
 
 backdrops = PNode('''
 1.5 Some kind of gas cloud with a red lightning strike going through it, in the middle of outer space.

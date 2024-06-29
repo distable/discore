@@ -1,9 +1,8 @@
 import re
 
 import numpy as np
-from PyQt6 import QtCore, QtGui
-from PyQt6.QtCore import QObject
-from pyqtgraph.Qt import QtCore
+from PyQt5 import QtCore, QtGui
+from PyQt5.QtCore import QObject
 
 
 ## Highligher Class written by igor-bogomolov

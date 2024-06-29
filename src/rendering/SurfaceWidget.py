@@ -1,5 +1,5 @@
-from PyQt6 import QtGui
-from PyQt6.QtWidgets import QWidget
+from PyQt5 import QtGui
+from PyQt5.QtWidgets import QWidget
 
 class SurfaceWidget(QWidget):
     def __init__(self, surf, parent=None):

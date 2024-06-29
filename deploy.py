@@ -15,7 +15,7 @@ from yachalk import chalk
 import jargs
 from src.classes.common import setup_ctrl_c
 from src.lib.corelib import shlexrun
-from src.lib.printlib import print_cmd
+from src.lib.loglib import print_cmd
 from jargs import args, argv
 from src.classes import paths
 from src import renderer
@@ -589,7 +589,7 @@ def deploy_vastai():
         renderer.enable_dev = True
         renderer.unsafe = False
         renderer.init()
-        renderer.run_loop()
+        renderer.run()
 
     t1 = threading.Thread(target=vastai_job)
     t2 = threading.Thread(target=balance_job)

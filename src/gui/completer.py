@@ -1,6 +1,6 @@
-from PyQt6.QtCore import QStringListModel
-from PyQt6.QtWidgets import QCompleter
-from PyQt6 import QtCore
+from PyQt5.QtCore import QStringListModel
+from PyQt5.QtWidgets import QCompleter
+from PyQt5 import QtCore
 
 
 class MyCompleter(QCompleter):

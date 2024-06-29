@@ -1,7 +1,9 @@
 import torch
+from controlnet_aux import HEDdetector
 from numpy import ndarray
 from PIL import Image
 
+# from ComfyUI.custom_nodes.comfyui_controlnet_aux.src.controlnet_aux.hed import HEDdetector
 from src.classes.convert import load_pil, pil2cv
 from src.classes.Plugin import Plugin
 from src.lib import devices
@@ -35,7 +37,8 @@ class HeddetPlugin(Plugin):
     def img_to_hed(self, img):
         img = load_pil(img)
         if self.heddet is None:
-            from controlnet_aux import HEDdetector
+            # from controlnet_aux import HEDdetector
+
             print("Loading HED detector")
             self.heddet = HEDdetector.from_pretrained("lllyasviel/ControlNet")
             # self.heddet.netNetwork = torch.compile(self.heddet.netNetwork)

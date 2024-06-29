@@ -17,11 +17,13 @@ install = False
 #     'glsl'
 # ]
 
-default_width = 640
-default_height = 448
-if args.remote:
-    default_width = 768
-    default_height = 512
+# default_width = 640
+# default_height = 448
+# if args.remote:
+default_width = 768
+default_height = 512
+
+comfy_workflows_path = 'D:/Projects/ComfyUI_windows_portable/ComfyUI/workflows-api/'
 
 # Core
 # ----------------------------------------
@@ -42,6 +44,12 @@ if args.remote:
 init_paths = [
     'sessions/.flows',
     'sessions/.inits'
+]
+
+session_paths = [
+    'F:/video-projects/shpongle-eclipse',
+    'F:/ai-projects',
+    'F:/ai-sessions'
 ]
 
 # sd1111.attention = 4

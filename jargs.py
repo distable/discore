@@ -2,6 +2,14 @@ import argparse
 import sys
 
 
+def int_or_str(value):
+    try:
+        # Try converting to an integer
+        return int(value)
+    except ValueError:
+        # If it fails, treat it as a string
+        return value
+
 argp = argparse.ArgumentParser()
 
 # Add positional argument 'project' for the script to run. optional, 'project' by default
@@ -9,11 +17,16 @@ argp.add_argument("session", nargs="?", default=None, help="Session or script")
 argp.add_argument("action", nargs="?", default=None, help="Script or action to run")
 argp.add_argument("subdir", nargs="?", default='', help="Subdir in the session")
 
+argp.add_argument('--frames', '-f', type=str, default=None, help='The frames to render in first:last,first:last,... format')
+argp.add_argument('--init', type=str, default=None, help='Specify init medias paths separated by semicolon. Can be youtube links or local files. If passing timestamps such as 00:00-00:10, the previous init data will be trimmed to that range.')
+argp.add_argument('--script', type=str, default=None, help='Specify script to use, can also be a session name to copy from.')
+
+argp.add_argument('-start', nargs='?', const=True, default=None, type=int_or_str, help='Immediately start rendering when the GUI is ready, can also specify a frame to start at. (-start 100)')
+# argp.add_argument('-start', action='store_true', help='Immediately start rendering when the GUI is ready.')
 argp.add_argument('-cli', action='store_true', help='Run the renderer in CLI mode. (no gui)')
 argp.add_argument('-opt', action='store_true', help='Run in optimized mode, enables various VRAM optimizations.')
 argp.add_argument('-ro', '--readonly', action='store_true', help='Run the renderer in read-only mode. (for viewing directories with auto-refresh)')
 argp.add_argument("-dry", action="store_true")
-argp.add_argument('--frames', '-f', type=str, default=None, help='The frames to render in first:last,first:last,... format')
 
 argp.add_argument('--run', action='store_true', help='Perform the run in a subprocess')
 argp.add_argument('--remote', action='store_true', help='Indicates that we are running on a remote server, used to enable more expensive computations or parameters.')
@@ -21,7 +34,7 @@ argp.add_argument('--print', action='store_true', help='Enable printing.')
 argp.add_argument('--dev', action='store_true', help='Enable dev mode on startup.')
 argp.add_argument('--trace', action='store_true', help='Enable tracing.')
 argp.add_argument('--trace-gpu', action='store_true', help='Enable tracing of models and VRAM.')
-argp.add_argument('--unsafe', action='store_true', help='Don\" catch some exceptions.')
+argp.add_argument('--unsafe', action='store_true', help='Don\" catch exceptions in renderer, allow them to blow up the program.')
 argp.add_argument('--profile', action='store_true', help='Enable profiling.')
 argp.add_argument('--profile_jobs', action='store_true', help='Profile each job one by one.')
 argp.add_argument('--profile_session_run', action='store_true', help='Profile session.run')
@@ -81,8 +94,15 @@ is_vastai = args.vastai or \
             args.vastai_trace
 is_vastai_continue = args.vastai or args.vastai_quick
 
+def is_gui():
+    return not args.cli
+
 def get_discore_session(load=True, *, nosubdir=False):
     from src.classes.Session import Session
+
+    if not args.session:
+        return None
+
     s = Session(args.session or args.action or args.script, load=load)
     if not nosubdir:
         s = s.subsession(args.subdir)
@@ -90,9 +110,9 @@ def get_discore_session(load=True, *, nosubdir=False):
     return s
 
 
-def framerange():
+def get_frameranges():
     if args.frames:
-        ranges = args.frames.split('-')
+        ranges = args.frames.split(':')
         for r in ranges:
             yield r
     else:

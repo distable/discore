@@ -98,7 +98,7 @@ Install all core requirements
     from src.installer import check_import
     from src.installer import python
     from src.installer import pipargs
-    from src.lib.printlib import printerr
+    from src.lib.loglib import printerr
 
     torch_command = os.environ.get('TORCH_COMMAND', "pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113")
     clip_package = os.environ.get('CLIP_PACKAGE', "git+https://github.com/openai/CLIP.git@d50d76daa670286dd6cacf3bcd80b5e4823fc8e1")
@@ -226,7 +226,7 @@ def main():
     from src.classes.logs import logdiscore_err
     from src.classes.logs import logdiscore
     from yachalk import chalk
-    from src.lib.printlib import print_existing_sessions, print_possible_scripts
+    from src.lib.loglib import print_existing_sessions, print_possible_scripts
 
     if args.newplug:
         plugin_wizard()

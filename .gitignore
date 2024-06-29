@@ -28,5 +28,8 @@ mount
 /plug-res/plug-embeddings
 /plug-repos
 /plug_repos
+/engines
 
 .openai_api_key
+*.log
+last_session.txt

@@ -1,6 +1,6 @@
 import pyqtgraph as pg
-from PyQt6 import QtCore
-from PyQt6.QtCore import QObject
+from PyQt5 import QtCore
+from PyQt5.QtCore import pyqtSignal, QObject
 from pyqtgraph.Qt import QtCore
 
 
@@ -9,7 +9,7 @@ class Crosshairs(QObject):
     x and y graph coordinates
     """
 
-    coordinates = QtCore.Signal(float, float)
+    coordinates = pyqtSignal(float, float)
 
     def __init__(self, plot, pen=None):
         """ Initiates the crosshars onto a plot given the pen style.

@@ -20,8 +20,14 @@ import librosa
 import resampy
 import soundfile
 
-from src.lib.printlib import trace_decorator
+from src.lib import loglib
+from src.lib.loglib import trace_decorator
 from src.party.maths import *
+from src.renderer import rv
+
+log: callable = loglib.make_log('audio')
+logerr: callable = loglib.make_logerr('audio')
+
 
 # TODO melodic speed
 # TODO harmonic chg speed
@@ -30,7 +36,7 @@ def load_audio_cache(filepath, cachename):
     filepath = Path(filepath)
     cachepath = get_audio_cachepath(filepath, cachename)
     if cachepath.exists():
-        print(f"audio.{cachename}({filepath.stem}): loading cache")
+        # print(f"audio.{cachename}({filepath.stem}): loading cache")
         return np.load(cachepath.as_posix())
 
     raise Exception(f"Cache file {cachepath} does not exist")
@@ -56,7 +62,7 @@ def save_audio_cache(filepath, cachename, arr, enable):
 def has_audio_cache(filepath, cachename, enable):
     cachepath = get_audio_cachepath(filepath, cachename)
     if enable and not cachepath.exists():
-        print(f"audio.{cachename}({filepath.stem}): missing cache, calculating ...")
+        log(f"audio.{cachename}({filepath.stem}): missing cache, calculating ...")
     return enable and cachepath.exists()
 
 

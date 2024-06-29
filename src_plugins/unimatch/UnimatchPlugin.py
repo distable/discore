@@ -12,7 +12,7 @@ from plug_repos.unimatch.unimatch.utils.utils import InputPadder
 from src.classes.convert import load_cv2, load_torch
 from src.classes.Plugin import Plugin
 from src.lib.devices import device
-from src.lib.printlib import trace_decorator
+from src.lib.loglib import trace_decorator
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
