@@ -1,3 +1,0 @@
-moderngl
-demosys-py
-glfw

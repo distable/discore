@@ -110,3 +110,13 @@ def has_exe(name):
 
 def make_short_guid():
     return str(uuid.uuid4())[:8]
+
+
+def setup_annoying_logging():
+    # Disable annoying message 'Some weights of the model checkpoint at openai/clip-vit-large-patch14 were not used ...'
+    from transformers import logging
+    logging.set_verbosity_error()
+    import sys
+    if not sys.warnoptions:
+        import warnings
+        warnings.simplefilter("ignore")

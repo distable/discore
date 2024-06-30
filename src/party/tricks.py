@@ -12,25 +12,23 @@ import os
 from colorsys import hsv_to_rgb
 from pathlib import Path
 
-import cv2
 import PIL
+import cv2
 import skimage
-import torch
 from PIL import Image
-from einops import rearrange
 from tqdm import tqdm, trange
 
-from controlnet_aux.depth_anything import DepthAnythingDetector
-from controlnet_aux.lineart_standard import LineartStandardDetector
-from controlnet_aux.teed import TEDDetector
-from controlnet_aux.zoe import ZoeDepthAnythingDetector
+# from controlnet_aux.depth_anything import DepthAnythingDetector
+# from controlnet_aux.lineart_standard import LineartStandardDetector
+# from controlnet_aux.teed import TEDDetector
+# from controlnet_aux.zoe import ZoeDepthAnythingDetector
 # from controlnet_aux.depth_anything import DepthAnythingDetector
 # from controlnet_aux.zoe import ZoeDepthAnythingDetector
 from src import plugins
 from src.classes import convert, paths
 from src.classes.convert import load_pil, pil2cv
 from src.classes.paths import get_flow_compute_dirpath
-from src.lib import devices, loglib
+from src.lib import loglib
 from src.lib.loglib import trace
 from src.party import maths
 from src.party.maths import *
@@ -2261,7 +2259,9 @@ def get_hybrid_video_motion_default_matrix(hybrid_video_motion):
 
 
 def init_detector(model_type):
-    import torch
+    from src.lib import devices
+    from controlnet_aux.zoe import ZoeDepthAnythingDetector
+    from controlnet_aux.depth_anything import DepthAnythingDetector
     det = None
 
     log(f"tricks.init_detector: Initializing detector '{model_type}'...")
@@ -2738,6 +2738,7 @@ def mat3d(image=None,
           flat: bool = False,
           **kwargs):
     from src import renderer
+    from src.lib import devices
     import torch
     rv = renderer.rv
 

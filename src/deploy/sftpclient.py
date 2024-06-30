@@ -1,4 +1,5 @@
 import subprocess
+import tempfile
 from pathlib import Path
 
 import paramiko
@@ -31,44 +32,45 @@ class SFTPClient(paramiko.SFTPClient):
         self.max_size = 1000000000
         self.urls = {
             'sd-v1-5.ckpt': '',
-            'vae.vae.pt'  : '',
+            'vae.vae.pt': '',
         }
         self.ssh = None
         self.enable_urls = True
         self.enable_print_upload = False
         self.enable_print_download = True
-        self.rsync = True
+        self.rclone = True
         self.ip = None
         self.port = None
         self.print_rsync = True
 
-    def put_any(self, source, target, forbid_rsync=False, force_rsync=False, forbid_recursive=False, rsync_excludes=None, rsync_includes=None, force=False):
-        if rsync_excludes is None:
-            rsync_excludes = []
-        if rsync_includes is None:
-            rsync_includes = []
-        # if source.is_file():
-        #     self.put_file(source, target)
-        #     return
+    def put_any(self, source, target,
+                forbid_rclone=False,
+                force_rclone=False,
+                forbid_recursive=False,
+                rclone_excludes=None,
+                rclone_includes=None,
+                force=False):
+        if rclone_excludes is None:
+            rclone_excludes = []
+        if rclone_includes is None:
+            rclone_includes = []
 
         source = Path(source)
         target = Path(target)
 
-        # Rsync automatically for directories, otherwise the rsync overhead is too much
-        if source.is_dir() or force_rsync:
-            self.put_rsync(source, target, forbid_recursive, rsync_excludes, rsync_includes)
-            # self.mkdir(target.as_posix(), ignore_existing=True)
-            # self.put_dir(source.as_posix(), target.as_posix())
+        if force_rclone or source.is_dir():
+            if force_rclone or not forbid_rclone:
+                self.put_rclone(source, target, forbid_recursive, rclone_excludes, rclone_includes)
+            else:
+                self.put_dir(source.as_posix(), target.as_posix())
         else:
             self.put_file(source.as_posix(), target.as_posix())
 
-    def put_dir(self, src, dst, *, forbid_rsync=False):
+    def put_dir(self, src, dst):
         """
-        Uploads the contents of the source directory to the target path. The
-        target directory needs to exists. All subdirectories in source are
-        created under target.
+        Uploads the contents of the source directory to the target path, individually one by one.
+        The target directory needs to exists. All subdirectories in source are created under target.
         """
-        import yachalk as chalk
         if Path(src).stem in ["__pycache__", ".idea"]:
             return
 
@@ -93,17 +95,20 @@ class SFTPClient(paramiko.SFTPClient):
                         else:
                             print(chalk.red("<!> Invalid URL '{url}' for "), item)
 
-                    from yachalk import chalk
                     print(chalk.red("<!> File too big, skipping"), item)
                     continue
 
                 if self.enable_print_upload:
                     self.print_upload(item, src, dst)
 
+                print(chalk.green(f"{src}/{item} -> {dst}/{item}"))
                 self.put(os.path.join(src, item), '%s/%s' % (dst, item))
             else:
+                print(chalk.green(f"Creating directory {dst}/{item}"))
                 self.mkdir('%s/%s' % (dst, item), ignore_existing=True)
-                self.put_dir(os.path.join(src, item), '%s/%s' % (dst, item), forbid_rsync=forbid_rsync)
+
+                print(chalk.green(f"{src} -> {dst}"))
+                self.put_dir(os.path.join(src, item), '%s/%s' % (dst, item))
 
     def put_file(self, src, dst):
         """
@@ -117,7 +122,7 @@ class SFTPClient(paramiko.SFTPClient):
         dst = Path(dst)
         if not self.ssh.file_exists(dst):
             print(chalk.green(f"{src} -> {dst}"))
-            self.put(src.as_posix(), dst.as_posix())
+            self.put(src.as_posix(), dst.as_posix().replace('\\', '/'))
         else:
             # Check mtime to see if src is newer
             try:
@@ -162,35 +167,73 @@ class SFTPClient(paramiko.SFTPClient):
             else:
                 print(chalk.dim(f"{src} -> {dst}"))
 
-    def put_rsync(self, source, target, forbid_recursive, rsync_excludes, rsync_includes):
+
+    def put_rclone(self, source, target, forbid_recursive, rclone_excludes, rclone_includes):
         source = Path(source)
         target = Path(target)
 
-        flags = ''
-        if self.print_rsync:
-            flags = 'v'
-        if not forbid_recursive:
-            flags += 'r'
-        flags2 = ""
-        for exclude in rsync_excludes:
-            flags2 += f" --exclude='{exclude}'"
-        for include in rsync_includes:
-            flags2 += f" --include='{include}'"
-        # if len(rsync_includes) > 0 and len(rsync_excludes) == 0:
-        #     flags2 += " --exclude='*'"
+        # Assume the SSH private key is stored in the default location
+        ssh_key_path = os.path.expanduser('~/.ssh/id_rsa')
 
-        target = target.parent
-        source = source.as_posix()
-        target = target.as_posix()
-        if target[-1] != '/':
-            target += '/'  # very important for rsync
+        # Create a temporary rclone config file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.conf') as temp_config:
+            temp_config.write(f"""[sftp]
+    type = sftp
+    host = {self.ip}
+    port = {self.port}
+    user = root
+    key_file = {ssh_key_path}
+    """)
+            temp_config_path = temp_config.name
 
-        cm = f"rsync -rlptgoDz{flags} --exclude '*/.*' -e 'ssh -p {self.port}' {source} root@{self.ip}:{target} {flags2}"
-        print_cmd(cm)
-        # self.ssh.run(cm)
+        flags = ['--progress']
+        if forbid_recursive:
+            flags.extend(['--max-depth', '1'])
+
+        for exclude in rclone_excludes:
+            flags.extend(['--exclude', exclude])
+        for include in rclone_includes:
+            flags.extend(['--include', include])
+
+        flags.extend([
+            '--update',
+            '--use-mmap',
+            '--delete-excluded',
+            '--checkers', '8',
+            '--transfers', '4',
+            '--sftp-set-modtime',
+        ])
+
+        # Construct the rclone command using the temporary config
+        rclone_cmd = [
+                         "rclone",
+                         "--config", temp_config_path,
+                         "copy",
+                         source.as_posix(),
+                         f"sftp:{target.as_posix()}",
+                         "-v"  # Add verbosity
+                     ] + flags
+
+        print_cmd(" ".join(rclone_cmd))
         print(f'{source} -> {target}')
-        os.system(cm)
-        # subprocess.run(cm, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+
+        try:
+            result = subprocess.run(
+                rclone_cmd,
+                check=True,
+                text=True,
+                capture_output=True
+            )
+            print(result.stdout)
+        except subprocess.CalledProcessError as e:
+            print(f"Error running rclone. Exit code: {e.returncode}")
+            print("Standard output:")
+            print(e.stdout)
+            print("Standard error:")
+            print(e.stderr)
+        finally:
+            # Clean up the temporary config file
+            os.unlink(temp_config_path)
 
     def print_upload(self, item, source, target):
         print(f"Uploading {os.path.join(source, item)} to {target}")

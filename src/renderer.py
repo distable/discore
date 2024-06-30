@@ -56,7 +56,8 @@ from src.gui.AudioPlayback import AudioPlayback
 from src.lib import loglib
 from src.lib.corelib import invoke_safe
 from src.lib.loglib import printbold, trace, trace_decorator
-from src.party import tricks, maths
+from src.party import tricks
+from src.party import maths
 from src.rendering import hud
 from src.rendering.rendervars import RenderVars
 

@@ -1,23 +1,17 @@
 import colorsys
 import os
 from datetime import timedelta
-from functools import lru_cache, wraps
 from typing import Callable, Any
-
-import torch
-from yachalk import chalk
-
-_print = print
-
 import sys
 import time
 import traceback
 from contextlib import contextmanager
 from time import perf_counter
-
 import numpy as np
-
 import jargs
+from yachalk import chalk
+
+_print = print
 
 print_timing = False
 print_trace = jargs.args.trace
@@ -288,8 +282,10 @@ def trace_decorator_noargs(func: Callable) -> Callable:
 
     return trace_wrapper
 
+
 def value_to_print_str(v):
     from PIL import Image
+    import torch
 
     s_v = ""
     if isinstance(v, np.ndarray):

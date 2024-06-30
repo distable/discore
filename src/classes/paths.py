@@ -6,12 +6,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
-import yaml
-
 import userconf
 from src.classes import folder_paths
 from src.lib import loglib
-from src.lib.loglib import printerr
 
 src_name = 'src'  # conflict with package names, must be underscore
 src_plugins_name = 'src_plugins'  # conflict with package names, must be underscore
@@ -704,7 +701,7 @@ def has_last_session():
 
 def parse_extra_model_paths(print_path):
     for yaml_path in extra_model_paths:
-        load_extra_path_config(yaml_path,print_path)
+        load_extra_path_config(yaml_path, print_path)
 
 
 def load_extra_path_config(yaml_path, print_path=False):
@@ -712,6 +709,7 @@ def load_extra_path_config(yaml_path, print_path=False):
         return
 
     with open(yaml_path, 'r') as stream:
+        import yaml
         config = yaml.safe_load(stream)
     for c in config:
         conf = config[c]
@@ -758,4 +756,3 @@ def get_controlnet_path(ckpt_name, required=False):
 
 
 parse_extra_model_paths(False)
-print(get_model_path('paragonV10_v10VAE.safetensors'))

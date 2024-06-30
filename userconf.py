@@ -77,7 +77,7 @@ forbidden_dev_jobs = [
 # Deployment
 # ----------------------------------------
 vastai_default_search = "gpu_name=RTX_3090 inet_down>400"
-vastai_sshfs = True  # Mount via sshfs
+vastai_sshfs = False  # Mount via sshfs
 vastai_sshfs_path = "~/discore/mount/"
 
 # deploy_urls = {
