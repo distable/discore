@@ -16,6 +16,8 @@ DEFAULT_ACTION = 'r'
 VENV_DIR = "venv"
 PYTHON_EXEC = "python3"
 
+from rich.traceback import install
+install()
 
 def on_ctrl_c():
     from src.classes.logs import logdiscore
@@ -113,15 +115,11 @@ def main():
     from yachalk import chalk
     from src.lib.loglib import print_existing_sessions, print_possible_scripts
 
-    if args.newplug:
-        plugin_wizard()
-        return
-
     if args.local:
-        from deploy import deploy_local
+        from deploy_new import deploy_local
         deploy_local()
     elif jargs.is_vastai:
-        from deploy import deploy_vastai
+        from deploy_new import deploy_vastai
         deploy_vastai()
     else:
         from src.classes import common

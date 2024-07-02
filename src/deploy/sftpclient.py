@@ -1,3 +1,4 @@
+import logging
 import subprocess
 import tempfile
 from pathlib import Path
@@ -9,19 +10,20 @@ from yachalk import chalk
 
 from src.lib.loglib import print_cmd
 
+log = logging.getLogger(__name__)
 
 def sshexec(ssh, cmd, with_printing=True):
     if with_printing:
-        print(f'$ {cmd}')
+        log.info(f'$ {cmd}')
     stdin, stdout, stderr = ssh.exec_command(cmd)
     stdout.channel.set_combine_stderr(True)
     ret = []
     for line in iter(stdout.readline, ""):
-        # print(line, end="")
+        # log.info(line, end="")
         ret.append(line)
     if with_printing:
         from yachalk import chalk
-        print(chalk.dim(''.join(ret)))
+        log.info(chalk.dim(''.join(ret)))
 
     # return ret
 
@@ -93,21 +95,21 @@ class SFTPClient(paramiko.SFTPClient):
                                 self.print_download(item, url, dst, url)
                             continue
                         else:
-                            print(chalk.red("<!> Invalid URL '{url}' for "), item)
+                            log.info(chalk.red("<!> Invalid URL '{url}' for "), item)
 
-                    print(chalk.red("<!> File too big, skipping"), item)
+                    log.info(chalk.red("<!> File too big, skipping"), item)
                     continue
 
                 if self.enable_print_upload:
                     self.print_upload(item, src, dst)
 
-                print(chalk.green(f"{src}/{item} -> {dst}/{item}"))
+                log.info(chalk.green(f"{src}/{item} -> {dst}/{item}"))
                 self.put(os.path.join(src, item), '%s/%s' % (dst, item))
             else:
-                print(chalk.green(f"Creating directory {dst}/{item}"))
+                log.info(chalk.green(f"Creating directory {dst}/{item}"))
                 self.mkdir('%s/%s' % (dst, item), ignore_existing=True)
 
-                print(chalk.green(f"{src} -> {dst}"))
+                log.info(chalk.green(f"{src} -> {dst}"))
                 self.put_dir(os.path.join(src, item), '%s/%s' % (dst, item))
 
     def put_file(self, src, dst):
@@ -121,7 +123,7 @@ class SFTPClient(paramiko.SFTPClient):
         src = Path(src)
         dst = Path(dst)
         if not self.ssh.file_exists(dst):
-            print(chalk.green(f"{src} -> {dst}"))
+            log.info(chalk.green(f"{src} -> {dst}"))
             self.put(src.as_posix(), dst.as_posix().replace('\\', '/'))
         else:
             # Check mtime to see if src is newer
@@ -132,11 +134,11 @@ class SFTPClient(paramiko.SFTPClient):
                 newer = True
 
             if newer:
-                print(chalk.yellow(f"{src} -> {dst}"))
+                log.info(chalk.yellow(f"{src} -> {dst}"))
                 self.mkdir(dst.parent.as_posix(), ignore_existing=True)
                 self.put(src.as_posix(), dst.as_posix())
             else:
-                print(chalk.dim(f"{src} -> {dst}"))
+                log.info(chalk.dim(f"{src} -> {dst}"))
 
     def get_file(self, src, dst):
         """
@@ -150,7 +152,7 @@ class SFTPClient(paramiko.SFTPClient):
         src = Path(src)
         dst = Path(dst)
         if not self.ssh.file_exists(src):
-            print(chalk.red(f"{src} -> {dst}"))
+            log.info(chalk.red(f"{src} -> {dst}"))
             self.get(src.as_posix(), dst.as_posix())
         else:
             # Check mtime to see if src is newer
@@ -161,11 +163,11 @@ class SFTPClient(paramiko.SFTPClient):
                 newer = True
 
             if newer:
-                print(chalk.yellow(f"{src} -> {dst}"))
+                log.info(chalk.yellow(f"{src} -> {dst}"))
                 self.mkdir(dst.parent.as_posix(), ignore_existing=True)
                 self.get(src.as_posix(), dst.as_posix())
             else:
-                print(chalk.dim(f"{src} -> {dst}"))
+                log.info(chalk.dim(f"{src} -> {dst}"))
 
 
     def put_rclone(self, source, target, forbid_recursive, rclone_excludes, rclone_includes):
@@ -215,7 +217,7 @@ class SFTPClient(paramiko.SFTPClient):
                      ] + flags
 
         print_cmd(" ".join(rclone_cmd))
-        print(f'{source} -> {target}')
+        log.info(f'{source} -> {target}')
 
         try:
             result = subprocess.run(
@@ -224,28 +226,28 @@ class SFTPClient(paramiko.SFTPClient):
                 text=True,
                 capture_output=True
             )
-            print(result.stdout)
+            log.info(result.stdout)
         except subprocess.CalledProcessError as e:
-            print(f"Error running rclone. Exit code: {e.returncode}")
-            print("Standard output:")
-            print(e.stdout)
-            print("Standard error:")
-            print(e.stderr)
+            log.info(f"Error running rclone. Exit code: {e.returncode}")
+            log.info("Standard output:")
+            log.info(e.stdout)
+            log.info("Standard error:")
+            log.info(e.stderr)
         finally:
             # Clean up the temporary config file
             os.unlink(temp_config_path)
 
     def print_upload(self, item, source, target):
-        print(f"Uploading {os.path.join(source, item)} to {target}")
+        log.info(f"Uploading {os.path.join(source, item)} to {target}")
 
     def print_download(self, item, source, target, url):
-        print(f"Downloading {item} from {source} to {target}")
+        log.info(f"Downloading {item} from {source} to {target}")
 
     def exists(self, path):
         try:
             if isinstance(path, Path):
                 path = path.as_posix()
-            # print(f'check if {path} exists', self.stat(path))
+            # log.info(f'check if {path} exists', self.stat(path))
             if self.lstat(path) is not None:
                 return True
             return False

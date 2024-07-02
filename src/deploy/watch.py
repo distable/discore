@@ -1,8 +1,10 @@
 import datetime
+import logging
 import os
 import threading
 import time
 
+log = logging.getLogger(__name__)
 
 class Watcher(object):
     def __init__(self, files=None, cmds=None, verbose=False):
@@ -58,15 +60,15 @@ class Watcher(object):
                 continue
 
             if mtime > self.mtimes[f]:
-                if self.verbose: print
-                "File changed: %s" % os.path.realpath(f)
+                if self.verbose:
+                    log.info("File changed: %s" % os.path.realpath(f))
                 self.mtimes[f] = mtime
                 if execute:
                     self.execute(f)
 
     def execute(self, f):
-        if self.verbose: print
-        "Running commands at %s" % (datetime.datetime.now(),)
+        if self.verbose:
+            log.info("Running commands at %s" % (datetime.datetime.now(),))
         for c in self.cmds:
             if isinstance(c, str):
                 os.system(c)
