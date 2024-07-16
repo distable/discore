@@ -1381,7 +1381,7 @@ heddet = None
 @trace_decorator
 def img_to_hed(img):
     # from src.party.annotator.hed import HEDdetector
-    from controlnet_aux.hed import HEDdetector
+    from src_plugins.controlnet_aux.hed import HEDdetector
     global heddet
     if heddet is None:
         heddet = HEDdetector.from_pretrained().to('cuda')
@@ -2260,8 +2260,8 @@ def get_hybrid_video_motion_default_matrix(hybrid_video_motion):
 
 def init_detector(model_type):
     from src.lib import devices
-    from controlnet_aux.zoe import ZoeDepthAnythingDetector
-    from controlnet_aux.depth_anything import DepthAnythingDetector
+    from src_plugins.controlnet_aux.zoe import ZoeDepthAnythingDetector
+    from src_plugins.controlnet_aux.depth_anything import DepthAnythingDetector
     det = None
 
     log(f"tricks.init_detector: Initializing detector '{model_type}'...")

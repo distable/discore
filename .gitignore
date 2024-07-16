@@ -19,7 +19,6 @@ notification.mp3
 /textual_inversion
 
 # User directories
-vast
 mount
 /sessions
 /scripts
@@ -34,6 +33,12 @@ ComfyUI
 /ComfyUI_windows_portable
 /discore/ComfyUI
 
-.openai_api_key
-*.log
+
+# Auto-downloaded
+vast
+# Auto-generated
 last_session.txt
+# User secrets
+.openai_api_key
+
+*.log
