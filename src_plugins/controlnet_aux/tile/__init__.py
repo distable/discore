@@ -2,7 +2,7 @@ import warnings
 import cv2
 import numpy as np
 from PIL import Image
-from controlnet_aux.util import get_upscale_method, common_input_validate, HWC3
+from src_plugins.controlnet_aux.util import get_upscale_method, common_input_validate, HWC3
 from .guided_filter import FastGuidedFilter
 
 class TileDetector:

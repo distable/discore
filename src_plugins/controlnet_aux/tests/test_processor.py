@@ -2,7 +2,7 @@
 import unittest
 from PIL import Image
 
-from controlnet_aux.processor import Processor
+from src_plugins.controlnet_aux.processor import Processor
 
 
 class TestProcessor(unittest.TestCase):

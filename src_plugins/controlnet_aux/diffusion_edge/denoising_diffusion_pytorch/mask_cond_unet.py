@@ -5,13 +5,13 @@ import math
 import torch.nn.functional as F
 from functools import partial
 from einops import rearrange, reduce
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.efficientnet import efficientnet_b7, EfficientNet_B7_Weights
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.resnet import resnet101, ResNet101_Weights
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.swin_transformer import swin_b, Swin_B_Weights
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.vgg import vgg16, VGG16_Weights
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.efficientnet import efficientnet_b7, EfficientNet_B7_Weights
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.resnet import resnet101, ResNet101_Weights
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.swin_transformer import swin_b, Swin_B_Weights
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.vgg import vgg16, VGG16_Weights
 
-from controlnet_aux.util import custom_torch_download
-# from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.wcc import fft
+from src_plugins.controlnet_aux.util import custom_torch_download
+# from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.wcc import fft
 ### Compared to unet4:
 # 1. add FFT-Conv on the mid feature.
 ######## Attention Layer ##########

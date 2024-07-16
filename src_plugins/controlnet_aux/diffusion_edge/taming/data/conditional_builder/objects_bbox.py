@@ -3,12 +3,12 @@ from typing import List, Tuple, Callable, Optional
 
 from PIL import Image as pil_image, ImageDraw as pil_img_draw, ImageFont
 from more_itertools.recipes import grouper
-from controlnet_aux.diffusion_edge.taming.data.image_transforms import convert_pil_to_tensor
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.image_transforms import convert_pil_to_tensor
 from torch import LongTensor, Tensor
 
-from controlnet_aux.diffusion_edge.taming.data.helper_types import BoundingBox, Annotation
-from controlnet_aux.diffusion_edge.taming.data.conditional_builder.objects_center_points import ObjectsCenterPointsConditionalBuilder
-from controlnet_aux.diffusion_edge.taming.data.conditional_builder.utils import COLOR_PALETTE, WHITE, GRAY_75, BLACK, additional_parameters_string, \
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.helper_types import BoundingBox, Annotation
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.conditional_builder.objects_center_points import ObjectsCenterPointsConditionalBuilder
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.conditional_builder.utils import COLOR_PALETTE, WHITE, GRAY_75, BLACK, additional_parameters_string, \
     pad_list, get_plot_font_size, absolute_bbox
 
 

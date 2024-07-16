@@ -1,8 +1,8 @@
 import cv2
 import numpy as np
 from PIL import Image
-from controlnet_aux.util import resize_image_with_pad, common_input_validate, HWC3, custom_hf_download, MESH_GRAPHORMER_MODEL_NAME
-from controlnet_aux.mesh_graphormer.pipeline import MeshGraphormerMediapipe, args
+from src_plugins.controlnet_aux.util import resize_image_with_pad, common_input_validate, HWC3, custom_hf_download, MESH_GRAPHORMER_MODEL_NAME
+from src_plugins.controlnet_aux.mesh_graphormer.pipeline import MeshGraphormerMediapipe, args
 import random, torch
 
 def set_seed(seed, n_gpu):

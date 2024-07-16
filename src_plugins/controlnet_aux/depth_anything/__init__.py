@@ -2,9 +2,9 @@ import numpy as np
 import torch
 from einops import repeat
 from PIL import Image
-from controlnet_aux.util import HWC3, common_input_validate, resize_image_with_pad, custom_hf_download, DEPTH_ANYTHING_MODEL_NAME
-from controlnet_aux.depth_anything.depth_anything.dpt import DPT_DINOv2
-from controlnet_aux.depth_anything.depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
+from src_plugins.controlnet_aux.util import HWC3, common_input_validate, resize_image_with_pad, custom_hf_download, DEPTH_ANYTHING_MODEL_NAME
+from src_plugins.controlnet_aux.depth_anything.depth_anything.dpt import DPT_DINOv2
+from src_plugins.controlnet_aux.depth_anything.depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
 from torchvision.transforms import Compose
 import cv2
 import torch.nn.functional as F

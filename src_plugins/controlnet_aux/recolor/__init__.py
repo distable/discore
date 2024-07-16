@@ -2,7 +2,7 @@ import warnings
 import cv2
 import numpy as np
 from PIL import Image
-from controlnet_aux.util import resize_image_with_pad, common_input_validate, HWC3
+from src_plugins.controlnet_aux.util import resize_image_with_pad, common_input_validate, HWC3
 
 #https://github.com/Mikubill/sd-webui-controlnet/blob/416c345072c9c2066101e225964e3986abe6945e/scripts/processor.py#L639
 def recolor_luminance(img, thr_a=1.0):

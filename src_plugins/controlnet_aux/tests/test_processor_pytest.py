@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from controlnet_aux.processor import MODELS, Processor
+from src_plugins.controlnet_aux.processor import MODELS, Processor
 
 
 @pytest.fixture(params=[

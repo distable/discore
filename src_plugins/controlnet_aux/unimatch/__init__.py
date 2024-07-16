@@ -7,7 +7,7 @@ import torch
 from einops import rearrange
 from PIL import Image
 
-from controlnet_aux.util import resize_image_with_pad,common_input_validate, custom_hf_download, UNIMATCH_MODEL_NAME
+from src_plugins.controlnet_aux.util import resize_image_with_pad,common_input_validate, custom_hf_download, UNIMATCH_MODEL_NAME
 from .utils.flow_viz import save_vis_flow_tofile, flow_to_image
 from .unimatch.unimatch import UniMatch
 import torch.nn.functional as F

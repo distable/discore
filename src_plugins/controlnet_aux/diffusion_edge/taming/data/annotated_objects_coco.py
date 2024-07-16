@@ -6,8 +6,8 @@ from collections import defaultdict
 
 from tqdm import tqdm
 
-from controlnet_aux.diffusion_edge.taming.data.annotated_objects_dataset import AnnotatedObjectsDataset
-from controlnet_aux.diffusion_edge.taming.data.helper_types import Annotation, ImageDescription, Category
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.annotated_objects_dataset import AnnotatedObjectsDataset
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.helper_types import Annotation, ImageDescription, Category
 
 COCO_PATH_STRUCTURE = {
     'train': {

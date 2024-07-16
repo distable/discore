@@ -7,7 +7,7 @@ from typing import Dict, Optional, Union
 
 from PIL import Image
 
-from controlnet_aux import (CannyDetector, ContentShuffleDetector, HEDdetector,
+from src_plugins.controlnet_aux import (CannyDetector, ContentShuffleDetector, HEDdetector,
                             LeresDetector, LineartAnimeDetector,
                             LineartDetector, MediapipeFaceDetector,
                             MidasDetector, MLSDdetector, NormalBaeDetector,

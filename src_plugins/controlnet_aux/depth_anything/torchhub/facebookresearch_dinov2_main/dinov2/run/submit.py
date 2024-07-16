@@ -12,7 +12,7 @@ from typing import List, Optional
 
 import submitit
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.cluster import (
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.cluster import (
     get_slurm_executor_parameters,
     get_slurm_partition,
     get_user_checkpoint_path,

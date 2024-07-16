@@ -14,7 +14,7 @@ import torch
 from einops import rearrange
 from PIL import Image
 
-from controlnet_aux.util import HWC3, nms, resize_image_with_pad, safe_step, common_input_validate, custom_hf_download, HF_MODEL_NAME
+from src_plugins.controlnet_aux.util import HWC3, nms, resize_image_with_pad, safe_step, common_input_validate, custom_hf_download, HF_MODEL_NAME
 
 
 class DoubleConvBlock(torch.nn.Module):

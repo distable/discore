@@ -126,7 +126,7 @@ The provided dataset implementation expects a few additional metadata files to b
 These metadata files can be generated (once) with the following lines of Python code:
 
 ```python
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data.datasets import ImageNet
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data.datasets import ImageNet
 
 for split in ImageNet.Split:
     dataset = ImageNet(split=split, root="<ROOT>", extra="<EXTRA>")

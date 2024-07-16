@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.utils.checkpoint
 from torch.nn.init import trunc_normal_
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.layers import Mlp, PatchEmbed, SwiGLUFFNFused, MemEffAttention, NestedTensorBlock as Block
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.layers import Mlp, PatchEmbed, SwiGLUFFNFused, MemEffAttention, NestedTensorBlock as Block
 
 
 logger = logging.getLogger("dinov2")

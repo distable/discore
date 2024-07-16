@@ -3,11 +3,11 @@ import yaml
 import argparse
 import math
 import torch
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.utils import *
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.encoder_decoder import AutoencoderKL
-# from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.transmodel import TransModel
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.uncond_unet import Unet
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.data import *
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.utils import *
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.encoder_decoder import AutoencoderKL
+# from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.transmodel import TransModel
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.uncond_unet import Unet
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.data import *
 from fvcore.common.config import CfgNode
 from pathlib import Path
 
@@ -39,7 +39,7 @@ class DiffusionEdge:
             ckpt_path=first_stage_cfg.ckpt_path,
         )
         if model_cfg.model_name == 'cond_unet':
-            from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.mask_cond_unet import Unet
+            from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.mask_cond_unet import Unet
             unet_cfg = model_cfg.unet
             unet = Unet(dim=unet_cfg.dim,
                         channels=unet_cfg.channels,
@@ -57,7 +57,7 @@ class DiffusionEdge:
         else:
             raise NotImplementedError
         if model_cfg.model_type == 'const_sde':
-            from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.ddm_const_sde import LatentDiffusion
+            from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.ddm_const_sde import LatentDiffusion
         else:
             raise NotImplementedError(f'{model_cfg.model_type} is not surportted !')
         

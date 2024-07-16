@@ -3,7 +3,7 @@ import numpy as np
 import custom_albumentations as albumentations
 from torch.utils.data import Dataset
 
-from controlnet_aux.diffusion_edge.taming.data.base import ImagePaths, NumpyPaths, ConcatDatasetWithIndex
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.base import ImagePaths, NumpyPaths, ConcatDatasetWithIndex
 
 
 class CustomBase(Dataset):

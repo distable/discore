@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from huggingface_hub import hf_hub_download
 
-from controlnet_aux.teed import TEDDetector
+from src_plugins.controlnet_aux.teed import TEDDetector
 # Requires comfyui_controlnet_aux funcsions and classes
 # from custom_nodes.comfyui_controlnet_aux.utils import common_annotator_call
 # from custom_nodes.comfyui_controlnet_aux.src.controlnet_aux.teed import TEDDetector

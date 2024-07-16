@@ -7,11 +7,11 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision import transforms
 
-from controlnet_aux.diffusion_edge.taming.data.conditional_builder.objects_bbox import ObjectsBoundingBoxConditionalBuilder
-from controlnet_aux.diffusion_edge.taming.data.conditional_builder.objects_center_points import ObjectsCenterPointsConditionalBuilder
-from controlnet_aux.diffusion_edge.taming.data.conditional_builder.utils import load_object_from_string
-from controlnet_aux.diffusion_edge.taming.data.helper_types import BoundingBox, CropMethodType, Image, Annotation, SplitType
-from controlnet_aux.diffusion_edge.taming.data.image_transforms import CenterCropReturnCoordinates, RandomCrop1dReturnCoordinates, \
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.conditional_builder.objects_bbox import ObjectsBoundingBoxConditionalBuilder
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.conditional_builder.objects_center_points import ObjectsCenterPointsConditionalBuilder
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.conditional_builder.utils import load_object_from_string
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.helper_types import BoundingBox, CropMethodType, Image, Annotation, SplitType
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.image_transforms import CenterCropReturnCoordinates, RandomCrop1dReturnCoordinates, \
     Random2dCropReturnCoordinates, RandomHorizontalFlipReturn, convert_pil_to_tensor
 
 

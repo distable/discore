@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Dict, List, Any
 import warnings
 
-from controlnet_aux.diffusion_edge.taming.data.annotated_objects_dataset import AnnotatedObjectsDataset
-from controlnet_aux.diffusion_edge.taming.data.helper_types import Annotation, Category
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.annotated_objects_dataset import AnnotatedObjectsDataset
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.helper_types import Annotation, Category
 from tqdm import tqdm
 
 OPEN_IMAGES_STRUCTURE = {

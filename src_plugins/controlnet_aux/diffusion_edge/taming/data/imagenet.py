@@ -7,8 +7,8 @@ import custom_albumentations as albumentations
 from omegaconf import OmegaConf
 from torch.utils.data import Dataset
 
-from controlnet_aux.diffusion_edge.taming.data.base import ImagePaths
-from controlnet_aux.diffusion_edge.taming.util import download, retrieve
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.base import ImagePaths
+from src_plugins.controlnet_aux.diffusion_edge.taming.util import download, retrieve
 import taming.data.utils as bdu
 
 

@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from .blocks import FeatureFusionBlock, _make_scratch
 import torch.nn.functional as F
-from controlnet_aux.util import TORCHHUB_PATH
+from src_plugins.controlnet_aux.util import TORCHHUB_PATH
 
 
 def _make_fusion_block(features, use_bn, size = None):

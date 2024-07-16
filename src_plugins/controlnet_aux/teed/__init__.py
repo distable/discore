@@ -11,7 +11,7 @@ import torch
 
 from .ted import TED  # TEED architecture
 from einops import rearrange
-from controlnet_aux.util import safe_step, custom_hf_download, BDS_MODEL_NAME, common_input_validate, resize_image_with_pad, HWC3
+from src_plugins.controlnet_aux.util import safe_step, custom_hf_download, BDS_MODEL_NAME, common_input_validate, resize_image_with_pad, HWC3
 from PIL import Image
 
 

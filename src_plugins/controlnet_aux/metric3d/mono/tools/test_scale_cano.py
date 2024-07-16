@@ -18,14 +18,14 @@ except:
 from datetime import timedelta
 import random
 import numpy as np
-from controlnet_aux.metric3d.mono.utils.logger import setup_logger
+from src_plugins.controlnet_aux.metric3d.mono.utils.logger import setup_logger
 import glob
-from controlnet_aux.metric3d.mono.utils.comm import init_env
-from controlnet_aux.metric3d.mono.model.monodepth_model import get_configured_monodepth_model
-from controlnet_aux.metric3d.mono.utils.running import load_ckpt
-from controlnet_aux.metric3d.mono.utils.do_test import do_scalecano_test_with_custom_data
-from controlnet_aux.metric3d.mono.utils.mldb import load_data_info, reset_ckpt_path
-from controlnet_aux.metric3d.mono.utils.custom_data import load_from_annos, load_data
+from src_plugins.controlnet_aux.metric3d.mono.utils.comm import init_env
+from src_plugins.controlnet_aux.metric3d.mono.model.monodepth_model import get_configured_monodepth_model
+from src_plugins.controlnet_aux.metric3d.mono.utils.running import load_ckpt
+from src_plugins.controlnet_aux.metric3d.mono.utils.do_test import do_scalecano_test_with_custom_data
+from src_plugins.controlnet_aux.metric3d.mono.utils.mldb import load_data_info, reset_ckpt_path
+from src_plugins.controlnet_aux.metric3d.mono.utils.custom_data import load_from_annos, load_data
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a segmentor')

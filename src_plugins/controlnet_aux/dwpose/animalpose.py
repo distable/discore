@@ -11,7 +11,7 @@ from .dw_torchscript.jit_pose import inference_pose as inference_jit_pose
 from typing import List, Optional
 from .types import PoseResult, BodyResult, Keypoint
 from timeit import default_timer
-from controlnet_aux.dwpose.util import guess_onnx_input_shape_dtype, get_ort_providers, get_model_type, is_model_torchscript
+from src_plugins.controlnet_aux.dwpose.util import guess_onnx_input_shape_dtype, get_ort_providers, get_model_type, is_model_torchscript
 import json
 import torch
 

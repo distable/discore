@@ -8,9 +8,9 @@ import logging
 import os
 import sys
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.log_regression import get_args_parser as get_log_regression_args_parser
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import setup_logging
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.run.submit import get_args_parser, submit_jobs
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.log_regression import get_args_parser as get_log_regression_args_parser
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import setup_logging
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.run.submit import get_args_parser, submit_jobs
 
 
 logger = logging.getLogger("dinov2")
@@ -21,7 +21,7 @@ class Evaluator:
         self.args = args
 
     def __call__(self):
-        from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.log_regression import main as log_regression_main
+        from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.log_regression import main as log_regression_main
 
         self._setup_args()
         log_regression_main(self.args)

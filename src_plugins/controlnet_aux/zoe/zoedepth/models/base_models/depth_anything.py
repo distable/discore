@@ -27,7 +27,7 @@ import torch.nn as nn
 import numpy as np
 from torchvision.transforms import Normalize
 from .dpt_dinov2.dpt import DPT_DINOv2
-from controlnet_aux.util import custom_hf_download, DEPTH_ANYTHING_MODEL_NAME
+from src_plugins.controlnet_aux.util import custom_hf_download, DEPTH_ANYTHING_MODEL_NAME
 
 
 def denormalize(x):

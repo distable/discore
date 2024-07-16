@@ -10,14 +10,14 @@ import logging
 import torch
 from torch import nn
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.loss import DINOLoss, iBOTPatchLoss, KoLeoLoss
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.models import build_model_from_cfg
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.layers import DINOHead
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.utils import has_batchnorms
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.param_groups import get_params_groups_with_decay, fuse_params_groups
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.fsdp import get_fsdp_wrapper, ShardedGradScaler, get_fsdp_modules, reshard_fsdp_model
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.loss import DINOLoss, iBOTPatchLoss, KoLeoLoss
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.models import build_model_from_cfg
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.layers import DINOHead
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.utils import has_batchnorms
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.param_groups import get_params_groups_with_decay, fuse_params_groups
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.fsdp import get_fsdp_wrapper, ShardedGradScaler, get_fsdp_modules, reshard_fsdp_model
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.models.vision_transformer import BlockChunk
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.models.vision_transformer import BlockChunk
 
 try:
     from xformers.ops import fmha

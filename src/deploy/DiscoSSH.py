@@ -16,7 +16,6 @@ from yachalk import chalk
 from src.deploy.deploy_utils import make_header_text, invalidate
 
 
-
 class NoTermSSHClientConnection(asyncssh.SSHClientConnection):
     def _process_pty_req(self, packet):
         return False
@@ -140,7 +139,7 @@ class DiscoSSH:
                 output = []
                 async for line in stream:
                     line = line.strip()
-                    if not line: continue # there were some empty lines...
+                    if not line: continue  # there were some empty lines...
 
                     full_line = f"{prefix}: {line}"
                     full_line = chalk.red(full_line) if is_error else chalk.gray(full_line)
@@ -491,7 +490,7 @@ class DiscoSSH:
             # '--fast-list',  # Use recursive list if possible, can speed up large transfers
             '--buffer-size', '2M',  # Increase buffer size for potentially better performance
             '--size-only',  # Only check file size, not modtime
-            '-v',
+            # '-v',
             '-q',
             '--stats-one-line'
         ]
@@ -586,7 +585,8 @@ class DiscoSSH:
         rclone_cmd = [
                          "rclone",
                          "--config", temp_config_path,
-                         "sync",  # Using 'sync' instead of 'copy' to ensure we get the latest changes
+                         "copy",
+                         "--update",
                          f"sftp:{source.as_posix()}",
                          target.as_posix(),
                          "-v"

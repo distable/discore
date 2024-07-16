@@ -6,7 +6,7 @@ from PIL import Image
 from tqdm import tqdm
 from torch.utils.data import Dataset
 
-from controlnet_aux.diffusion_edge.taming.data.sflckr import SegmentationBase # for examples included in repo
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.sflckr import SegmentationBase # for examples included in repo
 
 
 class Examples(SegmentationBase):

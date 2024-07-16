@@ -2,7 +2,7 @@ import os
 import torch
 import gc
 import numpy as np
-from controlnet_aux.mesh_graphormer.depth_preprocessor import Preprocessor
+from src_plugins.controlnet_aux.mesh_graphormer.depth_preprocessor import Preprocessor
 
 import torchvision.models as models
 from custom_mesh_graphormer.modeling.bert import BertConfig, Graphormer
@@ -25,7 +25,7 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from torchvision import transforms
 from pathlib import Path
-from controlnet_aux.util import custom_hf_download
+from src_plugins.controlnet_aux.util import custom_hf_download
 import custom_mesh_graphormer
 from comfy.model_management import soft_empty_cache
 from packaging import version

@@ -12,7 +12,7 @@ from collections import namedtuple
 from random import random, randint, sample, choice
 from .encoder_decoder import DiagonalGaussianDistribution
 import random
-from controlnet_aux.diffusion_edge.taming.modules.losses.vqperceptual import *
+from src_plugins.controlnet_aux.diffusion_edge.taming.modules.losses.vqperceptual import *
 
 # gaussian diffusion trainer class
 ModelPrediction = namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])

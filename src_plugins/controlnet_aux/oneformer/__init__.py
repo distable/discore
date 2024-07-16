@@ -2,7 +2,7 @@ import os
 from .api import make_detectron2_model, semantic_run
 from pathlib import Path
 import warnings
-from controlnet_aux.util import HWC3, common_input_validate, resize_image_with_pad, custom_hf_download, HF_MODEL_NAME
+from src_plugins.controlnet_aux.util import HWC3, common_input_validate, resize_image_with_pad, custom_hf_download, HF_MODEL_NAME
 import numpy as np
 import cv2
 from PIL import Image

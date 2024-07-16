@@ -7,7 +7,7 @@ from collections import namedtuple
 
 from .util import get_ckpt_path
 
-from controlnet_aux.util import custom_torch_download
+from src_plugins.controlnet_aux.util import custom_torch_download
 
 class LPIPS(nn.Module):
     # Learned perceptual metric

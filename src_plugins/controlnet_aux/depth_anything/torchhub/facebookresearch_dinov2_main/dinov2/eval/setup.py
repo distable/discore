@@ -10,8 +10,8 @@ from typing import Any, List, Optional, Tuple
 import torch
 import torch.backends.cudnn as cudnn
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.models import build_model_from_cfg
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.config import setup
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.models import build_model_from_cfg
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.config import setup
 import controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.utils as dinov2_utils
 
 

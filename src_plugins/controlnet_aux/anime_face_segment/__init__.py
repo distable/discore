@@ -3,7 +3,7 @@ from .util import seg2img
 import torch
 import os
 import cv2
-from controlnet_aux.util import HWC3, resize_image_with_pad, common_input_validate, custom_hf_download, BDS_MODEL_NAME
+from src_plugins.controlnet_aux.util import HWC3, resize_image_with_pad, common_input_validate, custom_hf_download, BDS_MODEL_NAME
 from huggingface_hub import hf_hub_download
 from PIL import Image
 from einops import rearrange
@@ -25,7 +25,7 @@ class AnimeFaceSegmentor:
         ckpt = torch.load(model_path)
         model.load_state_dict(ckpt)
         model.eval()
-        
+
         seg_model = AnimeSegmentation(seg_model_path)
         seg_model.net.eval()
         return cls(model, seg_model)
@@ -49,7 +49,7 @@ class AnimeFaceSegmentor:
             image_feed = image_feed / 255
             seg = self.model(image_feed).squeeze(dim=0)
             result = seg2img(seg.cpu().detach().numpy())
-        
+
         detected_map = HWC3(result)
         detected_map = remove_pad(detected_map)
         if remove_background:
@@ -59,8 +59,8 @@ class AnimeFaceSegmentor:
             tmp[:,:,:C] = detected_map
             tmp[:,:,3:] = mask
             detected_map = tmp
-        
+
         if output_type == "pil":
             detected_map = Image.fromarray(detected_map[..., :3])
-        
+
         return detected_map

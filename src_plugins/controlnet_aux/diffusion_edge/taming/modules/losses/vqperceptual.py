@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from controlnet_aux.diffusion_edge.taming.modules.losses.lpips import LPIPS
-from controlnet_aux.diffusion_edge.taming.modules.discriminator.model import NLayerDiscriminator, weights_init, NLayerDiscriminator2
+from src_plugins.controlnet_aux.diffusion_edge.taming.modules.losses.lpips import LPIPS
+from src_plugins.controlnet_aux.diffusion_edge.taming.modules.discriminator.model import NLayerDiscriminator, weights_init, NLayerDiscriminator2
 
 
 class DummyLoss(nn.Module):

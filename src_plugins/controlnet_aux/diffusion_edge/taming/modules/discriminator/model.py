@@ -2,7 +2,7 @@ import functools
 import torch.nn as nn
 
 
-from controlnet_aux.diffusion_edge.taming.modules.util import ActNorm
+from src_plugins.controlnet_aux.diffusion_edge.taming.modules.util import ActNorm
 
 
 def weights_init(m):

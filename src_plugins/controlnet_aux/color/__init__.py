@@ -3,7 +3,7 @@ import warnings
 import cv2
 import numpy as np
 from PIL import Image
-from controlnet_aux.util import HWC3, safer_memory, common_input_validate
+from src_plugins.controlnet_aux.util import HWC3, safer_memory, common_input_validate
 
 def cv2_resize_shortest_edge(image, size):
     h, w = image.shape[:2]
@@ -20,7 +20,7 @@ def apply_color(img, res=512):
     img = cv2_resize_shortest_edge(img, res)
     h, w = img.shape[:2]
 
-    input_img_color = cv2.resize(img, (w//64, h//64), interpolation=cv2.INTER_CUBIC)  
+    input_img_color = cv2.resize(img, (w//64, h//64), interpolation=cv2.INTER_CUBIC)
     input_img_color = cv2.resize(input_img_color, (w, h), interpolation=cv2.INTER_NEAREST)
     return input_img_color
 
@@ -30,8 +30,8 @@ class ColorDetector:
         input_image, output_type = common_input_validate(input_image, output_type, **kwargs)
         input_image = HWC3(input_image)
         detected_map = HWC3(apply_color(input_image, detect_resolution))
-        
+
         if output_type == "pil":
             detected_map = Image.fromarray(detected_map)
-            
+
         return detected_map

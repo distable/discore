@@ -4,7 +4,7 @@ import torch.utils.data as data
 import torch.nn as nn
 from pathlib import Path
 from functools import partial
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.utils import exists, convert_image_to_fn, normalize_to_neg_one_to_one
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.utils import exists, convert_image_to_fn, normalize_to_neg_one_to_one
 from PIL import Image, ImageDraw
 import torch.nn.functional as F
 import math

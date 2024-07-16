@@ -19,14 +19,14 @@ from torch import nn
 from torch.utils.data import TensorDataset
 from torchmetrics import MetricTracker
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import make_dataset
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data.transforms import make_classification_eval_transform
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.distributed import get_global_rank, get_global_size
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.metrics import MetricType, build_metric
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import get_args_parser as get_setup_args_parser
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import setup_and_build_model
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.utils import evaluate, extract_features
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.dtype import as_torch_dtype
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import make_dataset
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data.transforms import make_classification_eval_transform
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.distributed import get_global_rank, get_global_size
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.metrics import MetricType, build_metric
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import get_args_parser as get_setup_args_parser
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import setup_and_build_model
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.utils import evaluate, extract_features
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.dtype import as_torch_dtype
 
 
 logger = logging.getLogger("dinov2")

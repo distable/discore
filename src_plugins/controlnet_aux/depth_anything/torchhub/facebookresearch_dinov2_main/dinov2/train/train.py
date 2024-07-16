@@ -13,15 +13,15 @@ from functools import partial
 from fvcore.common.checkpoint import PeriodicCheckpointer
 import torch
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import SamplerType, make_data_loader, make_dataset
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import collate_data_and_cast, DataAugmentationDINO, MaskingGenerator
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import SamplerType, make_data_loader, make_dataset
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import collate_data_and_cast, DataAugmentationDINO, MaskingGenerator
 import controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.distributed as distributed
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.fsdp import FSDPCheckpointer
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import MetricLogger
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.config import setup
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.utils import CosineScheduler
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.fsdp import FSDPCheckpointer
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import MetricLogger
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.config import setup
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils.utils import CosineScheduler
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.train.ssl_meta_arch import SSLMetaArch
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.train.ssl_meta_arch import SSLMetaArch
 
 
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default

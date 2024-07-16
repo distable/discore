@@ -6,7 +6,7 @@ import torch
 from einops import rearrange
 from PIL import Image
 
-from controlnet_aux.util import HWC3, common_input_validate, resize_image_with_pad, custom_hf_download, HF_MODEL_NAME
+from src_plugins.controlnet_aux.util import HWC3, common_input_validate, resize_image_with_pad, custom_hf_download, HF_MODEL_NAME
 from .api import MiDaSInference
 
 

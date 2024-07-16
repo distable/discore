@@ -5,7 +5,7 @@ import custom_albumentations as albumentations
 from PIL import Image
 from torch.utils.data import Dataset
 
-from controlnet_aux.diffusion_edge.taming.data.sflckr import SegmentationBase # for examples included in repo
+from src_plugins.controlnet_aux.diffusion_edge.taming.data.sflckr import SegmentationBase # for examples included in repo
 
 
 class Examples(SegmentationBase):

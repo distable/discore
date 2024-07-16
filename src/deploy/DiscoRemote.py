@@ -22,7 +22,6 @@ from src.deploy.deploy_utils import open_terminal, get_git_remote_urls, invalida
 from src.deploy.watch import Watcher
 
 
-
 class DeploymentInstallationStep(Enum):
     """
     Refers to the progress of a deployment installation. (cloning, apt packages, pip installs)
@@ -358,7 +357,6 @@ Detected installation step: {step.name} ({step.value} / {DeploymentInstallationS
                 self.error(f"Failed to install {apt_package}, skipping ...")
                 self.error(e)
 
-
         # Mark the installation
         await self.ssh.run(f"touch {DiscoRemote.apt_checkpath}")
 
@@ -400,9 +398,10 @@ Detected installation step: {step.name} ({step.value} / {DeploymentInstallationS
 
             # Send the latest image (no need to know everything before)
             # We could send the last few images as well, that could be useful
-            src_file = self.session.f_last_path
-            dst_file = dst_path / paths.sessions_name / self.session.dirpath.stem / src_file.name
-            await self.ssh.put_any(src_file, dst_file)
+            if self.session.f_last > 0:
+                src_file = self.session.f_last_path
+                dst_file = dst_path / paths.sessions_name / self.session.dirpath.stem / src_file.name
+                await self.ssh.put_any(src_file, dst_file)
 
         invalidate()
 

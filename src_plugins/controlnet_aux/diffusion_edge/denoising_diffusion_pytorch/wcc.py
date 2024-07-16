@@ -4,8 +4,8 @@ import torch
 from torch import nn as nn
 from torch.nn import functional as F
 
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.quantization import weight_quantize_fn, act_quantize_fn
-from controlnet_aux.diffusion_edge.denoising_diffusion_pytorch import wavelet
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.quantization import weight_quantize_fn, act_quantize_fn
+from src_plugins.controlnet_aux.diffusion_edge.denoising_diffusion_pytorch import wavelet
 
 
 class WCC(nn.Conv1d):

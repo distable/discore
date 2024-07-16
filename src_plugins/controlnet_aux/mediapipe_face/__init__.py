@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from controlnet_aux.util import HWC3, common_input_validate, resize_image_with_pad
+from src_plugins.controlnet_aux.util import HWC3, common_input_validate, resize_image_with_pad
 from .mediapipe_face_common import generate_annotation
 
 

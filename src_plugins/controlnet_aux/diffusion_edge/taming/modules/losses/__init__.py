@@ -1,2 +1,2 @@
-from controlnet_aux.diffusion_edge.taming.modules.losses.vqperceptual import DummyLoss
+from src_plugins.controlnet_aux.diffusion_edge.taming.modules.losses.vqperceptual import DummyLoss
 

@@ -6,7 +6,7 @@ import torch.nn as nn
 from einops import rearrange
 from PIL import Image
 
-from controlnet_aux.util import HWC3, resize_image_with_pad, common_input_validate, custom_hf_download, DENSEPOSE_MODEL_NAME
+from src_plugins.controlnet_aux.util import HWC3, resize_image_with_pad, common_input_validate, custom_hf_download, DENSEPOSE_MODEL_NAME
 from .densepose import DensePoseMaskedColormapResultsVisualizer, _extract_i_from_iuvarr, densepose_chart_predictor_output_to_result_with_confidences
 
 N_PART_LABELS = 24
@@ -16,9 +16,9 @@ class DenseposeDetector:
         self.dense_pose_estimation = model
         self.device = "cpu"
         self.result_visualizer = DensePoseMaskedColormapResultsVisualizer(
-            alpha=1, 
-            data_extractor=_extract_i_from_iuvarr, 
-            segm_extractor=_extract_i_from_iuvarr, 
+            alpha=1,
+            data_extractor=_extract_i_from_iuvarr,
+            segm_extractor=_extract_i_from_iuvarr,
             val_scale = 255.0 / N_PART_LABELS
         )
 
@@ -32,7 +32,7 @@ class DenseposeDetector:
         self.dense_pose_estimation.to(device)
         self.device = device
         return self
-    
+
     def __call__(self, input_image, detect_resolution=512, output_type="pil", upscale_method="INTER_CUBIC", cmap="viridis", **kwargs):
         input_image, output_type = common_input_validate(input_image, output_type, **kwargs)
         input_image, remove_pad = resize_image_with_pad(input_image, detect_resolution, upscale_method)

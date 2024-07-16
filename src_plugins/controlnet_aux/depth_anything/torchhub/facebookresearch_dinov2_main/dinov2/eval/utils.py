@@ -11,9 +11,9 @@ import torch
 from torch import nn
 from torchmetrics import MetricCollection
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import DatasetWithEnumeratedTargets, SamplerType, make_data_loader
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import DatasetWithEnumeratedTargets, SamplerType, make_data_loader
 import controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.distributed as distributed
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import MetricLogger
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import MetricLogger
 
 
 logger = logging.getLogger("dinov2")

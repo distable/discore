@@ -11,9 +11,9 @@ import os
 from omegaconf import OmegaConf
 
 import controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.distributed as distributed
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import setup_logging
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils import utils
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.configs import dinov2_default_config
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import setup_logging
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.utils import utils
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.configs import dinov2_default_config
 
 
 logger = logging.getLogger("dinov2")

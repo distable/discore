@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from controlnet_aux.util import HWC3, common_input_validate, resize_image_with_pad, custom_hf_download, SAM_MODEL_NAME
+from src_plugins.controlnet_aux.util import HWC3, common_input_validate, resize_image_with_pad, custom_hf_download, SAM_MODEL_NAME
 from .automatic_mask_generator import SamAutomaticMaskGenerator
 from .build_sam import sam_model_registry
 

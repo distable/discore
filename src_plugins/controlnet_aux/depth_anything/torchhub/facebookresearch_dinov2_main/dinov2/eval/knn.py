@@ -16,12 +16,12 @@ import torch
 from torch.nn.functional import one_hot, softmax
 
 import controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.distributed as distributed
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import SamplerType, make_data_loader, make_dataset
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data.transforms import make_classification_eval_transform
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.metrics import AccuracyAveraging, build_topk_accuracy_metric
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import get_args_parser as get_setup_args_parser
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import setup_and_build_model
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.utils import ModelWithNormalize, evaluate, extract_features
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import SamplerType, make_data_loader, make_dataset
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data.transforms import make_classification_eval_transform
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.metrics import AccuracyAveraging, build_topk_accuracy_metric
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import get_args_parser as get_setup_args_parser
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import setup_and_build_model
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.utils import ModelWithNormalize, evaluate, extract_features
 
 
 logger = logging.getLogger("dinov2")

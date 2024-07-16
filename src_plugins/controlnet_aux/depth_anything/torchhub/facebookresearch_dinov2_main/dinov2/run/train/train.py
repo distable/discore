@@ -8,9 +8,9 @@ import logging
 import os
 import sys
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import setup_logging
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.train import get_args_parser as get_train_args_parser
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.run.submit import get_args_parser, submit_jobs
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import setup_logging
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.train import get_args_parser as get_train_args_parser
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.run.submit import get_args_parser, submit_jobs
 
 
 logger = logging.getLogger("dinov2")
@@ -21,7 +21,7 @@ class Trainer(object):
         self.args = args
 
     def __call__(self):
-        from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.train import main as train_main
+        from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.train import main as train_main
 
         self._setup_args()
         train_main(self.args)

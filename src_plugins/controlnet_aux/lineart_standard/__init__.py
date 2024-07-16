@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from PIL import Image
-from controlnet_aux.util import resize_image_with_pad, common_input_validate, HWC3
+from src_plugins.controlnet_aux.util import resize_image_with_pad, common_input_validate, HWC3
 
 class LineartStandardDetector:
     def __call__(self, input_image=None, guassian_sigma=6.0, intensity_threshold=8, detect_resolution=512, output_type=None, upscale_method="INTER_CUBIC", **kwargs):

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import sys
 # .path.append()
-from controlnet_aux.diffusion_edge.taming.modules.losses.vqperceptual import *
+from src_plugins.controlnet_aux.diffusion_edge.taming.modules.losses.vqperceptual import *
 
 
 class LPIPSWithDiscriminator(nn.Module):

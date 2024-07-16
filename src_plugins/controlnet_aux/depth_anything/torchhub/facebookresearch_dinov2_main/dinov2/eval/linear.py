@@ -18,14 +18,14 @@ import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
 from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import SamplerType, make_data_loader, make_dataset
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data.transforms import make_classification_eval_transform, make_classification_train_transform
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data import SamplerType, make_data_loader, make_dataset
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.data.transforms import make_classification_eval_transform, make_classification_train_transform
 import controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.distributed as distributed
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.metrics import MetricType, build_metric
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import get_args_parser as get_setup_args_parser
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import setup_and_build_model
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.utils import ModelWithIntermediateLayers, evaluate
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import MetricLogger
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.metrics import MetricType, build_metric
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import get_args_parser as get_setup_args_parser
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.setup import setup_and_build_model
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.utils import ModelWithIntermediateLayers, evaluate
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import MetricLogger
 
 
 logger = logging.getLogger("dinov2")

@@ -8,9 +8,9 @@ import logging
 import os
 import sys
 
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.knn import get_args_parser as get_knn_args_parser
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import setup_logging
-from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.run.submit import get_args_parser, submit_jobs
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.knn import get_args_parser as get_knn_args_parser
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.logging import setup_logging
+from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.run.submit import get_args_parser, submit_jobs
 
 
 logger = logging.getLogger("dinov2")
@@ -21,7 +21,7 @@ class Evaluator:
         self.args = args
 
     def __call__(self):
-        from controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.knn import main as knn_main
+        from src_plugins.controlnet_aux.depth_anything.torchhub.facebookresearch_dinov2_main.dinov2.eval.knn import main as knn_main
 
         self._setup_args()
         knn_main(self.args)
