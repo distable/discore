@@ -17,12 +17,14 @@ import userconf
 from src.lib.loglib import cputrace, trace, trace_decorator
 from . import convert, paths
 from .convert import load_json, load_pil, save_img, save_json, load_cv2
-from .logs import logsession, logsession_err
 from .paths import get_leadnum, get_leadnum_zpad, get_max_leadnum, get_min_leadnum, is_leadnum_zpadded, leadnum_zpad, parse_frame_string
-from ..lib import corelib
+from ..lib import corelib, loglib
 from ..lib.corelib import shlexproc
 
 FRAME_EXTRACTION_INFO_FILE_NAME = 'info.json'
+
+logger = loglib.make_log("session")
+logger_err = loglib.make_logerr("session")
 
 
 class Session:
@@ -82,7 +84,7 @@ class Session:
             self.dirpath = paths.sessions / name_or_abspath
         else:
             self.valid = False
-            logsession_err("Cannot create session! No name or path given!")
+            logger_err("Cannot create session! No name or path given!")
             return
 
         # Proceed with loading the session
@@ -93,12 +95,12 @@ class Session:
                     self.load(log=log)
         else:
             if log:
-                logsession("New session:", self.name)
+                logger("New session:", self.name)
 
         # Fix the zero-padding on the session directory
         if fixpad:
             if self.dirpath.is_dir() and not is_leadnum_zpadded(self.dirpath):
-                logsession("Session directory is not zero-padded. Migrating...")
+                logger("Session directory is not zero-padded. Migrating...")
                 self.make_zpad(leadnum_zpad)
 
         # Update the session.json modified date
@@ -193,9 +195,9 @@ class Session:
 
         if log:
             if not any(self.dirpath.iterdir()):
-                logsession(f"Loaded session {self.name} at {self.dirpath}")
+                logger(f"Loaded session {self.name} at {self.dirpath}")
             else:
-                logsession(f"Loaded session {self.name} ({self.dirpath} ({self.file})")
+                logger(f"Loaded session {self.name} ({self.dirpath} ({self.file})")
 
     @trace_decorator
     def load_f(self, f=None, *, clamped_load=False, img=True):
@@ -277,7 +279,7 @@ class Session:
         # Save the session data
         self.save_data()
 
-        logsession(f"session.save({path})")
+        logger(f"session.save({path})")
         return self
 
 
@@ -340,7 +342,7 @@ class Session:
                 self.make_sequential()
                 self.load()
 
-                logsession(f"Deleted {path}")
+                logger(f"Deleted {path}")
                 return True
 
         return False
@@ -502,7 +504,7 @@ class Session:
             i = max(i, 1)  # Frames start a 1
             self.f = i
         else:
-            logsession_err(f"Invalid seek argument: {i}")
+            logger_err(f"Invalid seek argument: {i}")
             return
 
         # self._image = None
@@ -510,7 +512,7 @@ class Session:
         self.load_f_img()
 
         if log:
-            logsession(f"({self.name}) seek({self.f})")
+            logger(f"({self.name}) seek({self.f})")
 
     def seek_min(self, *, log=False):
         if self.dirpath.exists() and any(self.dirpath.iterdir()):
@@ -933,10 +935,10 @@ class Session:
             if dst.exists():
                 if not overwrite:
                     if warn_existing:
-                        logsession(f"Frame extraction already exists for {src.name}, skipping ...")
+                        logger(f"Frame extraction already exists for {src.name}, skipping ...")
                     return dst
                 else:
-                    logsession(f"Frame extraction already exists for {src.name}, overwriting ...")
+                    logger(f"Frame extraction already exists for {src.name}, overwriting ...")
 
             pattern = self.res_frame_pattern(dst)
             lo, hi, name = self.get_frame_range(frames, src)

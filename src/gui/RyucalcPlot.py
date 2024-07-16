@@ -10,6 +10,7 @@ from src import renderer
 from src.lib import loglib
 from src.party import maths
 from src.renderer import rv, RendererState, RenderMode
+from src.rendering import hobo
 
 to_seconds = rv.to_seconds
 
@@ -94,7 +95,7 @@ def find_nearest_signal(signals, x, y) -> SignalEntry | None:
 
 
 def make_vline_pen():
-    if renderer.audio.is_playing():
+    if hobo.audio.is_playing():
         return mkPen('green', width=2, style=QtCore.Qt.PenStyle.SolidLine)
     else:
         return mkPen('white', width=2, style=QtCore.Qt.PenStyle.DotLine)

@@ -1,23 +1,19 @@
-print("Importing libraries")
-
-
-import logging
+import asyncio
 import os
 import shutil
 import sys
 from pathlib import Path
+
 import jargs
 from jargs import argp, args, spaced_args
-from src.lib import corelib
 from src.classes import paths
+from src.lib import corelib
 
 # Constants
 DEFAULT_ACTION = 'r'
 VENV_DIR = "venv"
 PYTHON_EXEC = "python3"
 
-from rich.traceback import install
-install()
 
 def on_ctrl_c():
     from src.classes.logs import logdiscore
@@ -29,8 +25,6 @@ def on_ctrl_c():
 
 
 def setup_environment():
-    logging.captureWarnings(True)
-    logging.getLogger("py.warnings").setLevel(logging.ERROR)
     os.chdir(Path(__file__).parent)
 
     global PYTHON_EXEC
@@ -39,7 +33,7 @@ def setup_environment():
 
 
 def check_requirements():
-    if os.name == 'posix' and os.geteuid() == 0:
+    if os.name == 'posix' and os.geteuid() == 0 and not args.remote:
         print("You are running as root, proceed at your own risks")
 
     if sys.version_info < (3, 9):
@@ -50,7 +44,7 @@ def check_requirements():
         sys.exit(1)
 
 
-def setup_virtual_environment():
+def setup_venv():
     if not args.no_venv:
         if not os.path.exists(VENV_DIR) or args.recreate_venv:
             if args.recreate_venv:
@@ -61,14 +55,28 @@ def setup_virtual_environment():
 
 
 def upgrade_requirements():
-    if args.no_venv:
-        os.system(f"{PYTHON_EXEC} -m pip install -r requirements.txt")
-    else:
-        os.system(f"{VENV_DIR}/bin/pip install -r requirements.txt")
-    print('----------------------------------------')
-    print("\n\n")
-    sys.exit(0)
+    reqfile = "requirements.txt" #if not args.remote else "requirements-vastai.txt"
+    req_path = paths.root / reqfile
 
+    pip_exec = f"{VENV_DIR}/bin/pip" if not args.no_venv else f"{PYTHON_EXEC} -m pip"
+
+    print(f"Upgrading packages from {reqfile}")
+    print('----------------------------------------')
+
+    with open(req_path, 'r') as file:
+        for line in file:
+            package = line.strip()
+            if package and not package.startswith('#'):
+                try:
+                    # print(f"Upgrading {package}...")
+                    cmd = f"{pip_exec} install --upgrade {package} --root-user-action=ignore"
+                    corelib.shlexrun(cmd, print_cmd=True, silent=True)
+                except Exception as e:
+                    print(f"Error upgrading {package}: {e}")
+                # print('----------------------------------------')
+
+    print("\nPackage upgrade process completed.")
+    sys.exit(0)
 
 def run_script():
     cmd = f"bash -c '"
@@ -111,16 +119,20 @@ def handle_action(action):
 
 
 def main():
-    from src.classes.logs import logdiscore_err, logdiscore
+    from src.classes.logs import logdiscore
     from yachalk import chalk
     from src.lib.loglib import print_existing_sessions, print_possible_scripts
+    from rich.traceback import install
+
+    if not args.remote:
+        install(show_locals=False)
 
     if args.local:
         from deploy_new import deploy_local
         deploy_local()
     elif jargs.is_vastai:
         from deploy_new import deploy_vastai
-        deploy_vastai()
+        asyncio.run(deploy_vastai())
     else:
         from src.classes import common
         common.setup_ctrl_c(on_ctrl_c)
@@ -152,11 +164,13 @@ if __name__ == '__main__':
     corelib.setup_annoying_logging()
     setup_environment()
 
+    # TODO we should remove the args instead when launching the nested --run instance
     if not args.run:
         check_requirements()
-        setup_virtual_environment()
+        setup_venv()
         if args.upgrade:
             upgrade_requirements()
+
         run_script()
         sys.exit(0)
 

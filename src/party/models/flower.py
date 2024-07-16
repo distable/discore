@@ -5,9 +5,10 @@ import torch.nn as nn
 
 from src.classes import paths
 from src.lib.loglib import trace_decorator
+from src.party.models import flow_utils
 from src.renderer import rv
 from src.rendering import hud
-from src_plugins.flower.flow_utils import frames_norm, flow_renorm, occl_renorm
+# from src_plugins.flower.flow_utils import frames_norm, flow_renorm, occl_renorm
 
 DEVICE = 'cuda'
 MODEL_H, MODEL_W = 512, 768  # Fixed dimensions for FloweR model
@@ -82,13 +83,13 @@ def get_flow(img):
     # _push_image(rv.session.res_frame_cv2(rv.f - 1))
     _push_image(img)
 
-    clip_frames_torch = frames_norm(torch.from_numpy(clip_frames).to(DEVICE, dtype=torch.float32))
+    clip_frames_torch = flow_utils.frames_norm(torch.from_numpy(clip_frames).to(DEVICE, dtype=torch.float32))
 
     with torch.no_grad():
         pred_data = model(clip_frames_torch.unsqueeze(0))[0]
 
-    pred_flow = flow_renorm(pred_data[..., :2]).cpu().numpy()
-    pred_occl = occl_renorm(pred_data[..., 2:3]).cpu().numpy().repeat(3, axis=-1)
+    pred_flow = flow_utils.flow_renorm(pred_data[..., :2]).cpu().numpy()
+    pred_occl = flow_utils.occl_renorm(pred_data[..., 2:3]).cpu().numpy().repeat(3, axis=-1)
 
     pred_flow = pred_flow / (1 + np.linalg.norm(pred_flow, axis=-1, keepdims=True) * 0.05)
     pred_flow = cv2.GaussianBlur(pred_flow, (71, 71), 1, cv2.BORDER_REFLECT_101)

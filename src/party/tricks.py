@@ -2636,6 +2636,7 @@ def transform_3d(imcv,
     if not convert.is_image(depth):
         raise ValueError("Depth image is required for 3D transformations")
 
+    from src.lib import devices
     import torch
     from src.party import py3d_tools
     imcv = load_cv2(imcv)

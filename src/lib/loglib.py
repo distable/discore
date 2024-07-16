@@ -1,4 +1,5 @@
 import colorsys
+import logging
 import os
 from datetime import timedelta
 from typing import Callable, Any
@@ -9,7 +10,6 @@ from contextlib import contextmanager
 from time import perf_counter
 import numpy as np
 import jargs
-from yachalk import chalk
 
 _print = print
 
@@ -22,6 +22,9 @@ trace_indent = 0
 
 # Set default decimal precision for printing
 np.set_printoptions(precision=2, suppress=True)
+
+use_logging_lib = False
+use_beeprint = False
 
 
 # import torch
@@ -60,8 +63,8 @@ def kprint(*kargs):
     print(s)
 
 
-def printkw(chalk=None, print_func=None, **kwargs):
-    print_func = print_func or print
+def printkw(chalk=None, fn_print=None, **kwargs):
+    fn_print = fn_print or print
 
     s = ""
     for k, v in kwargs.items():
@@ -69,19 +72,25 @@ def printkw(chalk=None, print_func=None, **kwargs):
         s += "  "
 
     if chalk:
-        print_func(chalk(s))
+        fn_print(chalk(s))
     else:
-        print_func(s)
+        fn_print(s)
 
 
-def print(*args, print_func=None, **kwargs):
-    print_func = print_func or _print
-    from beeprint import pp
+def print(*args, fn_print=None, **kwargs):
+    fn_print = fn_print or _print
+    if use_logging_lib:
+        fn_print = logging.info
+
     from munch import Munch
     if isinstance(args[0], dict) or isinstance(args[0], Munch):
-        pp(*args, **kwargs)
+        if use_beeprint:
+            from beeprint import pp
+            pp(*args, **kwargs)
+        else:
+            printkw(fn_print=fn_print, **args[0])
     else:
-        print_func(*args, **kwargs)
+        fn_print(*args, **kwargs)
 
 
 def print_bp(msg, *args, **kwargs):
@@ -360,6 +369,8 @@ progress_print_out = sys.stdout
 
 
 def get_color_for_time(seconds: float) -> Callable[[str], str]:
+    from yachalk import chalk
+
     # Define our gradient keypoints (time in seconds, hue)
     keypoints = [
         (0, 120),  # Green (very fast)

@@ -138,3 +138,5 @@ vastai_sshfs_path = "~/discore/mount/"
 # wc.related = ['', 'separating', 'repeating', 'alternating', 'overlapping']
 # wc.tex_layout = ['asymmetric tiling', 'symmetric tiling', 'symmetric', 'asymmetric', 'tiling']
 # wc.tex_shape = ['zig-zaggy', 'spiraling', 'contorting', 'stretching', "flower petal", "sunny", "coral", "crystalline water macro"]
+
+civitai_token = "5473fe76ed5ab61e1f092b3f0eba7ab4"

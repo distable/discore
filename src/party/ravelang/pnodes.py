@@ -1,4 +1,5 @@
 import copy
+import logging
 from pathlib import Path
 
 from src.classes import paths
@@ -10,6 +11,7 @@ from src.party.ravelang.PNode import PNode, wc_regex
 
 font = None
 
+log = logging.getLogger("ravelang")
 
 def dfs(node):
     stack = list()
@@ -94,6 +96,9 @@ def transform(self, wcconfs, globals):
                 env_template = globals.get(txt_children)
                 if env_template is None:
                     env_template = wcconfs.get(txt_children)
+                if env_template is None:
+                    log.error(f"Couldn't find template set '{txt_children}' in the provided wcconfs or globals.")
+                    return
                 tmpl_children = env_template.children
             if tmpl_children is None:
                 raise Exception(f"Couldn't get set: {txt_children}")

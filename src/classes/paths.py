@@ -2,6 +2,7 @@ import math
 import os
 import re
 import shutil
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -80,6 +81,14 @@ extra_model_paths = [
     '/media/data-team/Projects/ComfyUI_windows_portable/ComfyUI/extra_model_paths.yaml',
     r'D:\Projects\ComfyUI_windows_portable\ComfyUI\extra_model_paths.yaml'
 ]
+
+
+# Add comfyui to the path
+root_comfy = (root / 'ComfyUI')
+root_comfy_nodes = (root / 'ComfyUI' / 'custom_nodes')
+if root_comfy.exists():
+    sys.path.append(root_comfy.as_posix())
+
 
 
 # sys.path.insert(0, root.as_posix())
@@ -739,6 +748,20 @@ def get_model_path(ckpt_name, required=False):
 
     if required:
         raise ValueError(f"Model {ckpt_name} not found")
+    return None
+
+def get_ckpt_path(ckpt_name, required=False):
+    """
+    Get a SD model full path from its name, searching all the defined model locations
+    """
+    for k,v in folder_paths.folder_names_and_paths.items():
+        ret = folder_paths.get_full_path(k, ckpt_name)
+        if ret and Path(ret).exists():
+            return Path(ret)
+
+    if required:
+        raise ValueError(f"Model {ckpt_name} not found")
+
     return None
 
 

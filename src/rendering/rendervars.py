@@ -64,7 +64,7 @@ class RenderVars:
         self.n = 0
         self.prompt = ""
         self.promptneg = ""
-        self.nprompt = None
+        self.promptnode = None
         self.sampler = 'dpmpp'
         self.nextseed = 0
         self.w = userconf.default_width
@@ -99,6 +99,40 @@ class RenderVars:
 
                 raise AttributeError(f"RenderVars has no attribute '{key}'")  # This has caused too many issues
 
+
+    def set(self, key, value):
+        is_signal_assignment = isinstance(value, ndarray) and len(value.shape) == 1
+        is_number_assignment = isinstance(value, (float, int)) and not isinstance(value, bool)
+        is_array_mode = self.__dict__.get('is_array_mode', False)
+
+        if is_signal_assignment:
+            signal = value
+        elif is_number_assignment and is_array_mode:
+            if key in protected_names:
+                self.__dict__[key] = value
+                return
+            signal = np.ones(self.n) * value
+        else:
+            self.__dict__[key] = value
+            return
+
+        if key in protected_names:
+            log(f"set_signal: {key} is protected and cannot be set as a signal. Skipping...")
+            # self.__dict__[key] = value
+            return
+
+        if self.n > signal.shape[0]:
+            log(f"set_signal: {key} signal is too short. Padding with last value...")
+            signal = np.pad(signal, (0, self.n - signal.shape[0]), 'edge')
+        elif self.n < signal.shape[0]:
+            log(f"set_signal: {key} signal is longer than n, extending RenderVars.n to {signal.shape[0]}...")
+            self.set_n(signal.shape[0])
+
+        signal = Signal(signal, key)
+
+        self._signals[key] = signal
+        self._signals[f'{key}s'] = signal
+
     def __getattr__(self, key):
         """
         Access signals as object attributes.
@@ -112,7 +146,7 @@ class RenderVars:
         return self.get(key, True)
 
     def __setattr__(self, key, value):
-        self.set_signal(key, value)
+        self.set(key, value)
 
     def __contains__(self, name):
         return self.has_signal(name)
@@ -258,7 +292,7 @@ class RenderVars:
 
         self.resize_signals_to_n()
         rv.is_array_mode = False
-        rv.load_signal_values()
+        rv.load_signal_floats()
         rv.scalar = scalar
         rv.img = rv.session.img
         rv.prev_img = rv.session.res_frame_cv2(rv.f - 1, default=None)
@@ -281,21 +315,22 @@ class RenderVars:
         return n, t, indices
 
     def clear_signals(self):
-        self.unset_signals()
+        # remove from __dict__
+        for k,v in self._signals.items():
+            if k in self.__dict__: del self.__dict__[k]
+            if f'{k}s' in self.__dict__: del self.__dict__[f'{k}s']
+
         self._signals.clear()
         self._gsignals.clear()
         self._selected_gsignal = None
 
-    def unset_signals(self):
-        for k, v in self._signals.items():
-            self.__dict__.pop(k, None)
-            self.__dict__.pop(f'{k}s', None)
+
 
     def has_signal(self, name):
-        return name in self._signals or name in self.__dict__ and not isinstance(self.__dict__[name], int)
+        return name in self._signals
 
 
-    def load_signal_values(self):
+    def load_signal_floats(self):
         """
         Load the current frame values for each signal into __dict__.
         """
@@ -397,36 +432,6 @@ class RenderVars:
         for k, v in src.items():
             dst[k] = src[k].copy()
 
-    def set_signal(self, key, value):
-        is_signal_assignment = isinstance(value, ndarray) and len(value.shape) == 1
-        is_number_assignment = isinstance(value, (float, int)) and not isinstance(value, bool)
-        is_array_mode = self.__dict__.get('is_array_mode', False)
-
-        if is_signal_assignment:
-            signal = value
-        elif is_number_assignment and is_array_mode:
-            if key in protected_names:
-                self.__dict__[key] = value
-                return
-            signal = np.ones(self.n) * value
-        else:
-            self.__dict__[key] = value
-            return
-
-        if key in protected_names:
-            log(f"set_signal: {key} is protected and cannot be set as a signal. Skipping...")
-            # self.__dict__[key] = value
-            return
-
-        if self.n > signal.shape[0]:
-            log(f"set_signal: {key} signal is too short. Padding with last value...")
-            signal = np.pad(signal, (0, self.n - signal.shape[0]), 'edge')
-        elif self.n < signal.shape[0]:
-            log(f"set_signal: {key} signal is longer than n, extending RenderVars.n to {signal.shape[0]}...")
-            self.set_n(signal.shape[0])
-
-        self._signals[key] = signal
-        self._signals[f'{key}s'] = signal
 
     def load_cv2(self, img):
         return convert.load_cv2(img if img is not None else self.session.img)

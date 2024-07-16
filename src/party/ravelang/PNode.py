@@ -9,6 +9,7 @@ from src.party.ravelang.Keyframe import Keyframes
 from src.renderer import rv
 
 wc_regex = r'(([\w\d\s\-;%^&\./\\\'"]+)(:([\w|\d\/,]*))?(:([\w|\d\/,]+))?)'
+uuid = -1
 
 # noinspection PyUnresolvedReferences
 
@@ -54,7 +55,9 @@ class PNode:
         :param join_char: Character used to join child nodes' text
         :param join_num: Number of child nodes to join
         """
-        self.uuid = self._generate_uuid()
+        global uuid
+        uuid += 1
+        self.uuid = f"{uuid:04d}"
         self.children = []
         self.parent = None
         self.depth = 0

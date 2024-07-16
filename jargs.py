@@ -58,6 +58,7 @@ argp.add_argument('--preview_command', type=str, default='', help='The default f
 argp.add_argument('--shell', action='store_true', default=None, help='Open a shell in the deployed remote.')
 argp.add_argument('--local', action='store_true', help='Deploy locally. (test)')
 argp.add_argument('-vai', '--vastai', action='store_true', help='Deploy to VastAI or continue the existing deploy.')
+argp.add_argument('-vaig', '--vastai_gui', action='store_true', help='Open the deployment gui.')
 argp.add_argument('-vaiq', '--vastai_quick', action='store_true', help='Continue a previous deployment without any copying')
 argp.add_argument('-svai', '--vastai_stop', action='store_true', help='Stop the VastAI instance after running.')
 argp.add_argument('-rvai', '--vastai_reboot', action='store_true', help='Reboot the VastAI instance before running.')
@@ -69,6 +70,8 @@ argp.add_argument('-vaicp', '--vastai_copy', action='store_true', help='Copy fil
 argp.add_argument('-vais', '--vastai_search', type=str, default=None, help='Search for a VastAI server')
 argp.add_argument('-vaird', '--vastai_redeploy', action='store_true', help='Delete the Discore installation and start over. (mostly used for Discore development)')
 argp.add_argument('-vait', '--vastai_trace', action='store_true', help='Trace on the VastAI discore execution.')
+argp.add_argument('-vaish', '--vastai_shell', action='store_true', help='Only start a shell on the VastAI instance.')
+argp.add_argument('-vaify', '--vastai_comfy', action='store_true', help='Only start comfyui on the VastAI instance.')
 argp.add_argument('--vastai_no_download', action='store_true', help='Prevent downloading during copy step.')
 
 argv = sys.argv[1:]
@@ -82,6 +85,7 @@ spaced_args = ' '.join([f'"{arg}"' for arg in argv])
 sys.argv = [sys.argv[0]]
 
 is_vastai = args.vastai or \
+            args.vastai_gui or \
             args.vastai_upgrade or \
             args.vastai_install or \
             args.vastai_redeploy or \
@@ -91,7 +95,9 @@ is_vastai = args.vastai or \
             args.vastai_delete or \
             args.vastai_reboot or \
             args.vastai_list or \
-            args.vastai_trace
+            args.vastai_trace or \
+            args.vastai_shell or \
+            args.vastai_comfy
 is_vastai_continue = args.vastai or args.vastai_quick
 
 def is_gui():
@@ -137,6 +143,8 @@ def remove_deploy_args(oargs):
         arg = prefixed_arg.replace('-', '')
         if arg.startswith('vastai') or arg.startswith('vai') or arg.endswith('vai'):
             safe_list_remove(oargs, prefixed_arg)
+
+    return oargs
 
     # safe_list_remove(oargs, '--vastai')
     # safe_list_remove(oargs, '-vai')

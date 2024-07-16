@@ -77,7 +77,7 @@ current_dragndrop_file = None
 current_dragndrop_session = None
 current_dragndrop_img = None
 
-mprint = loglib.make_log('hobo')
+log = loglib.make_log('hobo')
 
 
 def discover_actions():
@@ -133,7 +133,7 @@ def start():
         latest_session, latest_session_mtime = paths.get_latest_session()
         if latest_session_mtime > time.time() - 60 * 60 * 12:
             renderer.change_session(Session(latest_session))
-            mprint(f'Loaded latest session: {latest_session}')
+            log(f'Loaded latest session: {latest_session}')
 
     on_session_changed(renderer.session)
 
@@ -302,6 +302,7 @@ def update():
         if renderer.is_gui_dispatch():  # renderer.enable_dev and
             renderer.run_iter()
     else:
+        log('Quitting ...')
         quit()
 
 

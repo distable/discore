@@ -73,7 +73,7 @@ def hud(*args, tcolor=(255, 255, 255), **kwargs):
     s = '\n'.join([s[i:i + maxlen] for i in range(0, len(s), maxlen)])
 
     if is_printing_enabled():
-        printkw(**kwargs, chalk=chalk.magenta, print_func=log)
+        printkw(**kwargs, chalk=chalk.magenta, fn_print=log)
     rows.append((s, tcolor))
 
 

@@ -1,5 +1,9 @@
-from typing import Generic, TypeVar, Sequence, Optional, Callable, List, Union, Dict, Any, Tuple
-from prompt_toolkit.formatted_text import StyleAndTextTuples, to_formatted_text
+import asyncio
+import enum
+from asyncio import coroutine
+from dataclasses import is_dataclass, fields
+from typing import Generic, TypeVar, Sequence, Optional, Callable, List, Union, Dict, Any, Tuple, Coroutine
+from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.layout import FormattedTextControl, Window, ScrollbarMargin, ConditionalMargin, Dimension
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
@@ -8,6 +12,9 @@ from prompt_toolkit.application import get_app
 import logging
 
 from prompt_toolkit.styles import Style
+
+from src.deploy.DrawCanvas import DrawCanvas
+from src.deploy.deploy_utils import forget
 
 STYLE_SEPARATOR = 'class:separator'
 STYLE_HEADER = 'class:header'
@@ -19,6 +26,8 @@ STYLE_COL_SORTED = 'class:column-sorted'
 
 _T = TypeVar("_T")
 Item = Union[tuple[_T, str], Dict[str, Any], Any]
+
+draw = DrawCanvas()
 
 
 class ButtonListError(Exception):
@@ -33,14 +42,16 @@ class ButtonList(Generic[_T]):
     default_style = "class:button-list-item"
     selected_style = "class:button-list-item-selected"
     show_scrollbar = True
+    enable_sorting = True
+    enable_confirm = True
 
     def __init__(self,
                  data: Sequence[Item],
                  handler: Optional[Callable] = None,
                  headers: Optional[List[str]] = None,
+                 hidden_headers: Optional[List[str]] = None,
                  first_item_as_headers: bool = False,
-                 separator_width: int = 1
-                 ):
+                 separator_width: int = 1):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
 
@@ -50,7 +61,8 @@ class ButtonList(Generic[_T]):
         self.data = data
         self.handler = handler
         self.separator_width = separator_width
-        self._headers = headers
+        self.headers = headers
+        self.hidden_headers = hidden_headers
         self._first_item_as_headers = first_item_as_headers
         self._selected_index = 0
         self._sort_column = None
@@ -72,7 +84,7 @@ class ButtonList(Generic[_T]):
         self._cached_column_widths = None
 
         self.control = FormattedTextControl(
-            self._get_text_fragments,
+            self._get_draw,
             key_bindings=self._create_key_bindings(),
             focusable=True,
         )
@@ -89,51 +101,139 @@ class ButtonList(Generic[_T]):
             width=Dimension(preferred=100)
         )
 
-    def _process_data(self):
+    def _process_data(self) -> Tuple[List[str], List[str]]:
+        """
+        Process input data to extract attribute names (keys) and determine display labels (headers).
+
+        This function handles various input data types and header configurations, ensuring
+        type consistency and handling edge cases.
+
+        Returns:
+            Tuple[List[str], List[str]]: Extracted keys and resolved headers.
+
+        Raises:
+            ButtonListError: For invalid data, unsupported types, or conflicting configurations.
+        """
+        # Validate input data
         if not self.data:
             raise ButtonListError("No values to process.")
 
-        if isinstance(self.data[0], tuple):
-            if len(self.data[0]) < 2:
-                raise ButtonListError("Tuple items must have at least two elements.")
-            keys = ['value', 'display']
-        elif isinstance(self.data[0], dict):
-            keys = list(self.data[0].keys())
-        elif hasattr(self.data[0], '__dict__'):
-            keys = list(self.data[0].__dict__.keys())
-        else:
-            raise ButtonListError(f"Unsupported item type: {type(self.data[0])}")
+        first_item = self.data[0]
 
-        headers = self._headers or keys
+        # Extract keys (attribute names) based on first item's type
+        match first_item:
+            case _ if isinstance(first_item, (int, float, str, bool)):
+                # For simple types: Use a single key 'value'
+                # Allows direct use of simple values
+                keys = ['value']
+            case tuple() as t if len(t) >= 2:
+                # For tuples: Use predefined keys ['value', 'display']
+                # Useful for simple key-value pairs
+                keys = ['value', 'display']
+            case dict() as d:
+                # For dictionaries: Use the dictionary keys directly
+                # Allows flexible attribute sets
+                keys = list(d.keys())
+            case object() if hasattr(first_item, '__dict__'):
+                # For objects with __dict__: Use object attributes
+                # Supports custom classes with dynamic attributes
+                keys = list(first_item.__dict__.keys())
+            case object() if is_dataclass(first_item):
+                # For dataclasses: Use field names
+                # Efficiently handles dataclass structures
+                keys = [f.name for f in fields(first_item)]
+            case _:
+                # Unsupported type: Raise an error
+                raise ButtonListError(f"Unsupported item type: {type(first_item)}")
+
+        # Resolve headers (display labels) from keys or user-provided headers
+        headers = self.headers or keys
+
+        match headers:
+            case dict():
+                # Dictionary mapping: Use provided mapping or fallback to key
+                # Allows custom labeling for some or all keys
+                headers = [headers.get(key, key) for key in keys]
+            case list() | tuple() as h if len(h) == len(keys):
+                # List/tuple replacement: Use provided headers if length matches
+                # Enables complete custom labeling
+                headers = list(h)
+            case list() | tuple():
+                raise ButtonListError("Number of headers must match number of keys.")
+            case _ if headers is not keys:
+                raise ButtonListError(f"Unsupported headers type: {type(headers)}")
+
+        # Handle 'hidden_headers' option
+        if self.hidden_headers:
+            # Remove hidden headers from display
+            headers = [header for header in headers if header not in self.hidden_headers]
+            keys = [key for key in keys if key not in self.hidden_headers]
+
+        # Remove headers that start with _ prefix
+        headers = [header for header in headers if not header.startswith('_')]
+        keys = [key for key in keys if not key.startswith('_')]
+
+        # Handle 'first_item_as_headers' option
         if self._first_item_as_headers:
-            if self._headers:
+            if self.headers:
+                # Conflicting options: Raise an error
                 raise ButtonListError("Cannot use both 'headers' and 'first_item_as_headers'.")
+            # Use first item as headers: Override previous headers
             headers = keys
+            # Remove first item from data as it's now used for headers
             self.data = self.data[1:]
 
+        # Cache results for future use
         self._cached_keys = keys
         self._cached_headers = headers
         return keys, headers
 
-    def _calculate_column_widths(self, keys, headers):
-        # We add +2 to the header length to account for the sort indicator
+    def _calculate_column_widths(self, keys: List[str], headers: List[str]) -> List[int]:
+        """
+        Calculate the width of each column based on the content and headers.
+
+        This function determines the maximum width needed for each column by considering
+        the length of headers and the content of each data item. It supports various
+        data types and handles edge cases to ensure consistent display.
+
+        Args:
+            keys (List[str]): The attribute names or keys for accessing data.
+            headers (List[str]): The display labels for each column.
+
+        Returns:
+            List[int]: The calculated width for each column.
+        """
+        # Initialize column widths based on headers
+        # Add space for separator and sort indicator
         column_widths = [len(str(header)) + self.separator_width * 2 + 2 for header in headers]
 
-        for item in self.data:
-            values = []
-            if isinstance(item, tuple):
-                values = [str(item[1])] + [''] * (len(headers) - 1)
-            elif isinstance(item, dict):
-                values = [str(item.get(key, '')) for key in keys]
-            elif hasattr(item, '__dict__'):
-                values = [str(getattr(item, key, '')) for key in keys]
+        for entry in self.data:
+            # Extract values based on entry type
+            match entry:
+                case tuple() as t if len(t) >= 2:
+                    # For tuples: Use second element as display value, pad others
+                    values = [str(t[1])] + [''] * (len(headers) - 1)
+                case str():
+                    # For strings: Use the string directly
+                    values = [str(entry)]
+                case dict() as d:
+                    # For dictionaries: Extract values using keys, handle missing keys
+                    values = [str(d.get(key, '')) for key in keys]
+                case object() if hasattr(entry, '__dict__'):
+                    # For objects: Extract attributes using keys, handle missing attributes
+                    values = [str(getattr(entry, key, '')) for key in keys]
+                case _:
+                    # Unsupported type: Use empty strings
+                    values = [''] * len(headers)
 
             # Ensure values has the same length as headers
             values += [''] * (len(headers) - len(values))
 
+            # Update column widths based on content length
             column_widths = [max(current, len(value))
                              for current, value in zip(column_widths, values)]
 
+        # Cache calculated widths for future use
         self._cached_column_widths = column_widths
         return column_widths
 
@@ -155,14 +255,14 @@ class ButtonList(Generic[_T]):
 
     def _create_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
-        kb.add("up")(lambda event: self._move_cursor(-1))
-        kb.add("down")(lambda event: self._move_cursor(1))
+        kb.add("up")(lambda event: self.move_cursor(-1))
+        kb.add("down")(lambda event: self.move_cursor(1))
         kb.add("left")(lambda event: self.sort_column_dir(-1))
         kb.add("right")(lambda event: self.sort_column_dir(1))
-        kb.add("pageup")(lambda event: self._move_cursor(-self._get_page_size()))
-        kb.add("pagedown")(lambda event: self._move_cursor(self._get_page_size()))
-        kb.add("enter")(lambda event: self._handle_enter())
-        kb.add(" ")(lambda event: self._handle_enter())
+        kb.add("pageup")(lambda event: self.move_cursor(-self._get_page_size()))
+        kb.add("pagedown")(lambda event: self.move_cursor(self._get_page_size()))
+        kb.add("enter")(lambda event: self.confirm_selection())
+        kb.add(" ")(lambda event: self.confirm_selection())
         kb.add(Keys.Any)(self._find)
 
         # Sorting for columns 1-9
@@ -200,51 +300,92 @@ class ButtonList(Generic[_T]):
             return len(app.layout.current_window.render_info.displayed_lines)
         return 10  # Default value if unable to determine
 
-    def _handle_enter(self) -> None:
-        if not self.data:
-            return
-        item = self.data[self._selected_index]
-        if self.handler:
-            try:
-                self.handler(item)
-            except Exception as e:
-                self.logger.error(f"Error in handler: {str(e)}")
-                raise ButtonListError(f"Error in handler: {str(e)}")
-        elif isinstance(item, tuple) and len(item) > 0 and isinstance(item[0], Callable):
-            try:
-                item[0]()
-            except Exception as e:
-                self.logger.error(f"Error calling item function: {str(e)}")
-                raise ButtonListError(f"Error calling item function: {str(e)}")
+    def _find(self, event: Any) -> None:
+        """
+        Find and select the next item starting with the given character.
 
-    def _move_cursor(self, offset: int) -> None:
-        if not self.data:
-            return
-        self._selected_index = max(0, min(len(self.data) - 1, self._selected_index + offset))
+        This function performs a case-insensitive search through the data,
+        starting from the currently selected item and wrapping around to the
+        beginning if necessary. It supports various data types and handles
+        edge cases to ensure consistent behavior.
 
-    def _find(self, event) -> None:
+        Args:
+            event (Any): The event containing the search character.
+
+        Returns:
+            None
+        """
         if not self.data:
             return
+
         char = event.data.lower()
         start_index = self._selected_index
         headers = self._get_headers()
+
         for i in range(len(self.data)):
+            # Calculate index with wrap-around
             index = (start_index + i + 1) % len(self.data)
-            item = self.data[index]
-            if isinstance(item, tuple):
-                text = str(item[1])
-            elif isinstance(item, dict):
-                text = str(item.get(headers[0], ''))
-            elif hasattr(item, '__dict__'):
-                text = str(getattr(item, headers[0], ''))
-            else:
-                continue
+            entry = self.data[index]
+
+            # Extract searchable text based on entry type
+            text = self._extract_searchable_text(entry, headers[0])
 
             if text.lower().startswith(char):
                 self._selected_index = index
                 return
 
+    def _extract_searchable_text(self, entry: Any, key: str) -> str:
+        """
+        Extract searchable text from an entry based on its type.
+
+        Args:
+            entry (Any): The data entry to extract text from.
+            key (str): The key or attribute name to use for dict/object entries.
+
+        Returns:
+            str: The extracted text, or an empty string if extraction fails.
+        """
+        match entry:
+            case tuple() if len(entry) >= 2:
+                return str(entry[1])
+            case dict():
+                return str(entry.get(key, ''))
+            case object() if hasattr(entry, '__dict__'):
+                return str(getattr(entry, key, ''))
+            case _:
+                return ''
+
+    def move_cursor(self, offset: int) -> None:
+        if not self.data:
+            return
+        self._selected_index = max(0, min(len(self.data) - 1, self._selected_index + offset))
+
+    def confirm_selection(self) -> None:
+        if not self.enable_confirm:
+            return
+        if not self.data:
+            return
+
+        item = self.data[self._selected_index]
+
+        def execute_handler(handler: Union[Callable, Coroutine], *args):
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    forget(handler(*args))
+                else:
+                    handler(*args)
+            except Exception as e:
+                self.logger.error(f"Error in handler: {str(e)}")
+                raise ButtonListError(f"Error in handler: {str(e)}")
+
+        if self.handler:
+            execute_handler(self.handler, item)
+        elif isinstance(item, tuple) and len(item) > 0 and callable(item[0]):
+            execute_handler(item[0])
+
     def sort_column(self, column_index: int) -> None:
+        if not self.enable_sorting: return
+
         headers = self._get_headers()
         if column_index < 0 or column_index >= len(headers):
             # self.logger.error(f"Invalid column index: {column_index}")
@@ -277,102 +418,95 @@ class ButtonList(Generic[_T]):
         next_column = next_column % len(self._get_headers())
         self.sort_column(next_column)
 
-    def _get_text_fragments(self) -> StyleAndTextTuples:
+    def _get_draw(self) -> StyleAndTextTuples:
+        """Generate the formatted content for drawing the button list."""
         keys, headers = self._process_data()
         column_widths = self._calculate_column_widths(keys, headers)
 
-        fragments: List[Tuple[str, str]] = []
-
-        def add_horizontal_line():
-            line = '─' * (sum(column_widths) + len(column_widths) - 1)
-            fragments.append(('class:separator', f'─{line}─\n'))
-
-        # TODO ask robot to refactor the function to use this
-        def draw(style, text):
-            fragments.append((style, text))
-
-        # Calculate total width
-        # ----------------------------------------
-        total_width = sum(column_widths) + len(column_widths) - 1
-
-        # Draw top border
-        # ----------------------------------------
-        add_horizontal_line()
-
-        # Draw headers
-        # ----------------------------------------
+        draw.reset(total_width=sum(column_widths) + len(column_widths) + 1)
+        draw.horizontal_line()
         if headers:
-            for i, header in enumerate(headers):
-                is_sorted_col = i == self._sort_column
-                UP_ARROW_FA = "\uf062"
-                DOWN_ARROW_FA = "\uf063"
-                UP_CHEVRON_FA = "\uf077"
-                DOWN_CHEVRON_FA = "\uf078"
-                UP_ARROW_MD = "\uf05d"
-                DOWN_ARROW_MD = "\uf045"
+            self._draw_header_rows(headers, column_widths)
+            draw.horizontal_line()
+        self._draw_content_rows(keys, headers, column_widths)
+        draw.horizontal_line()
+        self._draw_footer()
 
-                sort_indicator = '  '
-                if is_sorted_col and self._sort_ascending: sort_indicator = f'{UP_ARROW_FA} '
-                if is_sorted_col and not self._sort_ascending: sort_indicator = f'{DOWN_ARROW_FA} '
+        return draw.get_fragments()
 
+    def _draw_header_rows(self, headers: List[str], column_widths: List[int]):
+        """Draw the header row with sort indicators."""
+        cells = []
+        for i, (header, width) in enumerate(zip(headers, column_widths)):
+            is_sorted_col = i == self._sort_column
+            sort_indicator = self._get_sort_indicator(is_sorted_col)
+            header_text = f'{sort_indicator}{header}'
+            cells.append((header_text, width))
+        draw.table_row(cells, STYLE_HEADER)
 
-                header_text = f'{sort_indicator}{header}'
-                fragments.append((STYLE_SEPARATOR, ' ' * self.separator_width))
-                fragments.append((STYLE_HEADER, f'{header_text:<{column_widths[i]}}'))
-                fragments.append((STYLE_SEPARATOR, ' ' * self.separator_width))
-
-            fragments.append(('', '\n'))
-
-            # Draw header-content separator
-            add_horizontal_line()
-
-        # Draw content
-        # ----------------------------------------
+    def _draw_content_rows(self, keys: List[str], headers: List[str], column_widths: List[int]):
+        """Draw the content rows."""
         for row_index, item in enumerate(self.data):
             is_selected_row = row_index == self._selected_index
 
             if is_selected_row:
-                fragments.append(("[SetCursorPosition]", ""))
+                draw.text("[SetCursorPosition]", "")
 
-            # Collect the fragments for this row
-            rowfrags = []
             try:
-                if isinstance(item, tuple):
-                    column_text_entries = [str(item[1])] + [''] * (len(headers) - 1)
-                elif isinstance(item, dict) or hasattr(item, '__dict__'):
-                    column_text_entries = [str(item.get(key, '') if isinstance(item, dict) else getattr(item, key, '')) for key in keys]
-                else:
-                    raise ButtonListError(f"Unsupported item type: {type(item)}")
-
-                # Draw the columns
-                for col_index, (column_entry, column_width) in enumerate(zip(column_text_entries, column_widths)):
-                    column_style = self.get_column_style(col_index, )
-                    style = STYLE_ROW_HIGHLIGHT if is_selected_row else column_style
-
-                    rowfrags.append((style, ' ' * self.separator_width))
-                    rowfrags.append((style, f'{column_entry:<{column_width}}'))
-                    rowfrags.append((style, ' ' * self.separator_width))
-
+                column_text_entries = self._get_column_text_entries(item, keys, headers)
+                cells = list(zip(column_text_entries, column_widths))
+                style = self.get_cell_style(row_index)
+                if is_selected_row:
+                    style = STYLE_ROW_HIGHLIGHT
+                draw.table_row(cells, style)
             except Exception as e:
                 self.logger.error(f"Error formatting item {row_index}: {str(e)}")
-                rowfrags.append(('class:error', f"Error: {str(e)}"))
+                draw.text('class:error', f"Error: {str(e)}").newline()
 
-            fragments.extend(rowfrags)
-            fragments.append(('', '\n'))
-
-        # Draw bottom border
-        # ----------------------------------------
-        add_horizontal_line()
-
-        # Draw footer with item count
-        # ----------------------------------------
+    def _draw_footer(self):
+        """Draw the footer with item count."""
         footer_text = f' Total items: {len(self.data)} '
-        footer_padding = max(0, total_width - len(footer_text))
-        fragments.append((STYLE_FOOTER, footer_text + ' ' * footer_padding))
+        draw.centered_text(footer_text, STYLE_FOOTER)
 
-        return fragments
+    def _get_sort_indicator(self, is_sorted_col: bool) -> str:
+        """Get the appropriate sort indicator for a column."""
+        UP_ARROW_FA, DOWN_ARROW_FA = "\uf062", "\uf063"
+        if not is_sorted_col:
+            return '  '
+        return f'{UP_ARROW_FA} ' if self._sort_ascending else f'{DOWN_ARROW_FA} '
 
-    def get_column_style(self, col_index):
+    def _get_column_text_entries(self, item: Any, keys: List[str], headers: List[str]) -> List[str]:
+        """
+        Extract text entries for each column based on item type.
+
+        Handles enums by returning their name or value appropriately.
+        """
+
+        def format_value(value: Any) -> str:
+            if isinstance(value, enum.Enum):
+                if isinstance(value.value, str):
+                    return value.value
+                elif isinstance(value.value, (int, float)):
+                    return value.name
+                else:
+                    return str(value.name)  # Fallback for other types
+            return str(value)
+
+        match item:
+            case str():
+                return [item]
+            case tuple() if len(item) >= 2:
+                return [format_value(item[1])] + [''] * (len(headers) - 1)
+            case dict():
+                return [format_value(item.get(key, '')) for key in keys]
+            case object() if hasattr(item, '__dict__'):
+                return [format_value(getattr(item, key, '')) for key in keys]
+            case _:
+                raise ButtonListError(f"Unsupported item type: {type(item)}")
+
+    def get_cell_style(self, col_index):
+        column_style = ''
+
         is_sort_column = col_index == self._sort_column
         if col_index % 2 == 0:
             column_style = STYLE_COL_EVEN

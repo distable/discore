@@ -28,7 +28,6 @@ beeprint
 # stumpy
 python-dateutil
 psutil
-paramiko
 # gensim~=4.2.0
 soundfile
 matplotlib==3.8.2
@@ -39,6 +38,7 @@ wheel==0.42.0
 cryptography==42.0.2
 packaging
 cython~=0.29.33
+gdown
 
 # Maths
 opensimplex==0.4.5

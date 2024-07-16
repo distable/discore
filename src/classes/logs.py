@@ -1,7 +1,5 @@
 from src.lib import loglib
 
-logsession = loglib.make_log("session")
-logsession_err = loglib.make_logerr("session")
 logdiscore = loglib.make_log("discore")
 logdiscore_err = loglib.make_logerr("discore")
 logcore = loglib.make_log("core")

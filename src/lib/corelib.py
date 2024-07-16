@@ -5,8 +5,6 @@ from colorsys import hsv_to_rgb
 from pathlib import Path
 import time
 
-
-
 rgb_to_hex = lambda tuple: f"#{int(tuple[0] * 255):02x}{int(tuple[1] * 255):02x}{int(tuple[2] * 255):02x}"
 
 
@@ -46,8 +44,12 @@ def shlexrun(cmd, print_cmd=True, shell=False, silent=False, **kwargs):
         cmd_str = ' '.join(cmd)
 
     if print_cmd:
-        from yachalk import chalk
-        print(chalk.grey(f"> {cmd_str}"))
+        try:
+            from yachalk import chalk
+            s = chalk.grey(f"> {cmd_str}")
+        except:
+            s = f"> {cmd_str}"
+        print(s)
 
     if silent:
         # kwargs['stderr'] = subprocess.DEVNULL
@@ -73,6 +75,7 @@ def shlexproc(cmd, **kwargs):
 def shlexproc_err(cm):
     proc = shlexproc(cm, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, shell=True)
     return proc.stdout.decode('utf-8')
+
 
 def invoke_safe(func, *kargs, failsleep=0.0, unsafe=False, **kwargs):
     if isinstance(func, list):
@@ -103,6 +106,7 @@ def invoke_safe(func, *kargs, failsleep=0.0, unsafe=False, **kwargs):
             time.sleep(failsleep)
             return False
 
+
 def has_exe(name):
     ret = subprocess.call(['git', '--version'])
     return ret == 0
@@ -113,9 +117,17 @@ def make_short_guid():
 
 
 def setup_annoying_logging():
+    import logging
+    logging.captureWarnings(True)
+    logging.getLogger("py.warnings").setLevel(logging.ERROR)
+
     # Disable annoying message 'Some weights of the model checkpoint at openai/clip-vit-large-patch14 were not used ...'
-    from transformers import logging
-    logging.set_verbosity_error()
+    try:
+        from transformers import logging
+        logging.set_verbosity_error()
+    except:
+        pass
+
     import sys
     if not sys.warnoptions:
         import warnings

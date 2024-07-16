@@ -12,7 +12,6 @@ import numpy as np1
 import torch
 
 import jargs
-from scripts.interfaces import diffusers_lib
 from src import plugins, renderer
 from src.classes import convert, paths
 from src.classes.common import first_non_null
@@ -69,9 +68,9 @@ def get_demucs_paths(dirpath):
 
 
 def run_demucs(fpath):
-    if jargs.args.remote:
-        log("Demucs not supported in remote mode. Run locally first and generate the audio data, then deploy again to send that data.")
-        return
+    # if jargs.args.remote:
+    #     log("Demucs not supported in remote mode. Run locally first and generate the audio data, then deploy again to send that data.")
+    #     return
 
     fpath = Path(fpath)
     dirpath = fpath.parent
@@ -147,7 +146,7 @@ def init_music(demucs=False):
 
             pca = audio.load_pca(path, 3)
             for i, pc in enumerate(pca):
-                rv.set_signal(f'pca{i + 1}', norm(pc))
+                rv.set(f'pca{i + 1}', norm(pc))
 
             # rv.piano_pca1, = audio.load_pca(fpiano, 1)
             rv.bass_pca1, = audio.load_pca(fbass, 1)
@@ -282,15 +281,18 @@ def set_prompt(prompt, **kwargs):
     if kwargs is None:
         kwargs = renderer.script.__dict__
 
-    global prompt_last
-    if rv.nprompt is None or prompt != prompt_last:
-        prompt_last = prompt
-        maths.set_seed(rv.session.name, with_torch=False)
-        dic = {**lang.__dict__, **kwargs}
-        rv.nprompt = pnodes.bake_prompt(prompt, confmap, dic)
+    if not prompt:
+        rv.promptnode = None
+    else:
+        global prompt_last
+        if rv.promptnode is None or prompt != prompt_last:
+            prompt_last = prompt
+            maths.set_seed(rv.session.name, with_torch=False)
+            dic = {**lang.__dict__, **kwargs}
+            rv.promptnode = pnodes.bake_prompt(prompt, confmap, dic)
 
 
-# rv.nprompt.update_state()
+# rv.promptnode.update_state()
 
 
 class DynamicFlow:

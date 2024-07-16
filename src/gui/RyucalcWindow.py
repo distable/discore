@@ -350,7 +350,7 @@ class RyucalcWindow(QMainWindow):
         if ev.key() == QtCore.Qt.Key.Key_Space:
             # Play at mouse position
             # ----------------------------------------
-            renderer.audio.desired_name = self.signals[0].name
+            hobo.audio.desired_name = self.signals[0].name
             # x = x_from_seconds(self.plot.mouse_x_seconds)
             # self.plot.change_info_pos(x, self.mouse_y)
             renderer.seek(rv.to_frame(self.plot.infopos_x), clamp=False)
