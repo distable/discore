@@ -40,5 +40,6 @@ vast
 last_session.txt
 # User secrets
 .openai_api_key
+userconf.py
 
 *.log
